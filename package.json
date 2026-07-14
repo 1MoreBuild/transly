@@ -1,0 +1,26 @@
+{
+  "name": "transly",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "os": ["darwin"],
+  "scripts": {
+    "setup": "npm run preflight && npm run native:install && npm run native:doctor",
+    "preflight": "node tools/preflight.mjs",
+    "test": "node --test bridge/*.test.mjs native-host/*.test.mjs",
+    "doctor": "node native-host/doctor.mjs",
+    "codex:doctor": "node bridge/doctor.mjs",
+    "native:install": "node native-host/install.mjs",
+    "native:uninstall": "node native-host/uninstall.mjs",
+    "native:doctor": "node native-host/doctor.mjs",
+    "native:smoke": "node native-host/smoke.mjs"
+  },
+  "optionalDependencies": {
+    "@langfuse/otel": "^5.9.0",
+    "@langfuse/tracing": "^5.9.0",
+    "@opentelemetry/sdk-node": "^0.219.0"
+  }
+}

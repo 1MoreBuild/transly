@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Codex Translate</title>
+    <style>
+      body {
+        width: 280px;
+        margin: 0;
+        padding: 14px;
+        font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #1f2933;
+      }
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 600;
+      }
+      input {
+        box-sizing: border-box;
+        width: 100%;
+        height: 34px;
+        padding: 6px 8px;
+        border: 1px solid #c9d2dc;
+        border-radius: 6px;
+        font: inherit;
+      }
+      button {
+        width: 100%;
+        height: 36px;
+        margin-top: 10px;
+        border: 0;
+        border-radius: 6px;
+        background: #155eef;
+        color: white;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #eef2f6;
+        color: #1f2933;
+      }
+      #status {
+        min-height: 18px;
+        margin-top: 10px;
+        color: #52606d;
+      }
+      #status[data-tone="ready"] {
+        color: #16794b;
+      }
+      #status[data-tone="error"] {
+        color: #b42318;
+      }
+    </style>
+  </head>
+  <body>
+    <label for="targetLanguage">Target language</label>
+    <input id="targetLanguage" value="zh-CN">
+    <button id="translateArticle">Translate article</button>
+    <button id="clearArticle" class="secondary">Clear article translations</button>
+    <button id="enableSubtitles" class="secondary">Enable subtitle overlay</button>
+    <div id="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

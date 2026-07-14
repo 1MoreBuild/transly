@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Transly",
+  "version": "0.0.1",
+  "description": "Article and subtitle translation through a local Codex Native Host.",
+  "minimum_chrome_version": "105",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAopmoHha85q5NEQqG8S+FOf9h3B5ussIIL0E040Payul4XiS3iMm6kNEb+CQJMVKD9EfCYMeqNIYSRLq/Ajba2H5JWhsRgpuCwTIpzSaVL9IvCTIAFe34fC30lOdpzz+RAu1kGS7ecz2ajicHQ0DANFJmMe3+2rzlmE4rFhqNjCMk+yr9+x1vITHptqHaJEpowxwtsDc1R4/6ghJtA05RnVqgumkZDwngxT7WQD0HeM4xWoWapY1GklfQSaumfIKqU3cV3nkjWMFRLHDVxl54GMVEs4TGJ2L+ua/4RKnnNzwS7cLIVlQunfl8nmDm1qY5tggJY4Ws8Xxhloyfh19YFQIDAQAB",
+  "permissions": ["activeTab", "nativeMessaging", "scripting", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Transly"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/article.js", "src/content/subtitle-content.js"],
+      "css": ["src/content/styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "matches": ["<all_urls>"],
+      "resources": ["src/injected/subtitle-hook.js"]
+    }
+  ]
+}
