@@ -1,6 +1,7 @@
+(function initializeArticleContentScript() {
 const ARTICLE_BATCH_CHARS = 28000;
 const ARTICLE_CONTEXT_CHARS = 36000;
-const ARTICLE_MAX_ITEMS = 220;
+const ARTICLE_AUDIT_MAX_CANDIDATES = 440;
 const ARTICLE_MIN_TEXT_CHARS = 24;
 const ARTICLE_FALLBACK_MAX_TEXT_CHARS = 2500;
 const ARTICLE_AUDIT_MAX_BLOCKS = 60;
@@ -60,6 +61,7 @@ const ARTICLE_AUDIT_EXCLUDE_SELECTORS = [
 ];
 const ARTICLE_PROTECTED_INLINE_SELECTOR = [
   "a[href]",
+  "br",
   "code", "kbd", "samp", "var",
   "math", "svg", "canvas", "img",
   "sub", "sup",
@@ -113,27 +115,76 @@ const ARTICLE_CONTAINER_HINTS = [
 ];
 
 let articleRunId = 0;
+let activeArticleClientRunId = "";
+let articleDisplayMode = "bilingual";
+let articleRuntimeState = {
+  status: "idle",
+  startedAt: null,
+  finishedAt: null,
+  error: null
+};
+
+initializeArticleDisplayMode();
+document.addEventListener("click", handleTranslationRevealClick);
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "TRANSLY_TRANSLATE_ARTICLE") {
-    translateArticle(message.targetLanguage || "zh-CN")
-      .then((summary) => sendResponse({ ok: true, data: summary }))
+    const clientRequestId = crypto.randomUUID();
+    activeArticleClientRunId = clientRequestId;
+    setArticleRuntimeState("running", { clientRequestId });
+    sendResponse({ ok: true, data: { status: "started", clientRequestId } });
+
+    translateArticle(message.targetLanguage || "zh-CN", clientRequestId)
+      .then((summary) => {
+        if (activeArticleClientRunId !== clientRequestId) return;
+        setArticleRuntimeState(summary?.cancelled ? "idle" : "translated", { clientRequestId });
+      })
       .catch((error) => {
         console.error("[transly] article translation failed", error);
-        showToast(String(error?.message || error), { tone: "error", timeout: 6000 });
-        sendResponse({ ok: false, error: String(error?.message || error) });
+        if (activeArticleClientRunId === clientRequestId) {
+          showToast(String(error?.message || error), { tone: "error", timeout: 6000 });
+          setArticleRuntimeState("error", {
+            clientRequestId,
+            error: String(error?.message || error)
+          });
+        }
       });
     return true;
   }
 
+  if (message?.type === "TRANSLY_SET_ARTICLE_DISPLAY_MODE") {
+    setArticleDisplayMode(message.mode);
+    sendResponse({ ok: true, data: { articleDisplayMode } });
+    return true;
+  }
+
   if (message?.type === "TRANSLY_CLEAR_ARTICLE") {
+    activeArticleClientRunId = "";
     clearArticleTranslations();
+    setArticleRuntimeState("idle");
     sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message?.type === "TRANSLY_GET_PAGE_STATE") {
+    sendResponse({
+      ok: true,
+      data: {
+        articleTranslated: Boolean(document.querySelector(".transly-translation:not(.transly-loading)")),
+        articleStatus: articleRuntimeState.status,
+        articleStartedAt: articleRuntimeState.startedAt,
+        articleFinishedAt: articleRuntimeState.finishedAt,
+        articleError: articleRuntimeState.error,
+        articleDisplayMode,
+        clientRequestId: activeArticleClientRunId || null,
+        subtitleEnabled: document.documentElement.dataset.translySubtitlesEnabled === "true"
+      }
+    });
     return true;
   }
 });
 
-async function translateArticle(targetLanguage) {
+async function translateArticle(targetLanguage, clientRequestId) {
   const runId = ++articleRunId;
   clearArticleTranslations({ cancelActiveRun: false, quiet: true });
 
@@ -142,19 +193,23 @@ async function translateArticle(targetLanguage) {
     throw new Error("This page is excluded by the article rule.");
   }
   const container = findArticleContainer(rule);
-  const segments = collectArticleSegments(container, rule).slice(0, ARTICLE_MAX_ITEMS);
+  const segments = collectArticleSegments(container, rule);
   if (!segments.length) {
     const settings = await getSettings();
     const recovered = await runArticleAuditRepair({
       runId,
       phase: "initial",
       targetLanguage,
+      clientRequestId,
       root: document.body,
       rule,
       translatedSegments: [],
       settings,
       context: buildFallbackArticleContext(document.body)
     });
+    if (recovered.cancelled || runId !== articleRunId || clientRequestId !== activeArticleClientRunId) {
+      return { cancelled: true };
+    }
     if (recovered.repairedCount) {
       showToast(`Article translation recovered by AI audit: ${recovered.repairedCount} blocks.`, {
         timeout: 3500
@@ -170,45 +225,25 @@ async function translateArticle(targetLanguage) {
   }
 
   const settings = await getSettings();
-  const batchChars = Number(settings.articleBatchChars || ARTICLE_BATCH_CHARS);
   const context = buildArticleContext(segments, Number(settings.articleContextChars || ARTICLE_CONTEXT_CHARS));
-  const batches = chunkItems(segments, batchChars);
-  let translatedCount = 0;
-
-  showToast(`Translating ${segments.length} article blocks in ${batches.length} batches...`);
-
-  for (let index = 0; index < batches.length; index++) {
-    if (runId !== articleRunId) return { cancelled: true };
-
-    const batch = batches[index];
-    markBatch(batch, "working");
-    showToast(`Article batch ${index + 1}/${batches.length}...`);
-
-    try {
-      const cacheKey = await sha256([
-        "article",
-        location.href,
-        targetLanguage,
-        batch.map((item) => `${item.id}:${item.text}`).join("\n")
-      ].join("\n"));
-      const response = await requestTranslation({
-        mode: "article",
-        targetLanguage,
-        url: location.href,
-        title: document.title,
-        context,
-        cacheKey,
-        items: batch.map(({ id, text }) => ({ id, text }))
-      });
-      translatedCount += renderArticleTranslations(batch, response.items || [], targetLanguage);
-      markBatch(batch, "done");
-    } catch (error) {
-      markBatch(batch, "idle");
-      throw error;
-    }
-
-    await sleep(Number(settings.minDelayMs || 500));
+  const planner = globalThis.TranslyArticleBatching?.planArticleBatches;
+  if (typeof planner !== "function") {
+    throw new Error("Article batching runtime is unavailable. Reload the Transly extension.");
   }
+  const batchPlans = planner(segments, {
+    maxChars: settings.articleBatchChars || ARTICLE_BATCH_CHARS,
+    maxItems: settings.articleBatchMaxItems || 28
+  });
+  const translation = await translateArticleBatches({
+    runId,
+    clientRequestId,
+    targetLanguage,
+    segments,
+    context,
+    batchPlans
+  });
+  if (translation.cancelled) return { cancelled: true };
+  let translatedCount = translation.translatedCount;
 
   let audit = { enabled: Boolean(settings.enableArticleAuditLoop !== false), repairedCount: 0, actionCount: 0 };
   try {
@@ -216,6 +251,7 @@ async function translateArticle(targetLanguage) {
       runId,
       phase: "post-translate",
       targetLanguage,
+      clientRequestId,
       root: document.body,
       rule,
       translatedSegments: segments,
@@ -223,6 +259,9 @@ async function translateArticle(targetLanguage) {
       context
     });
   } catch (error) {
+    if (runId !== articleRunId || clientRequestId !== activeArticleClientRunId) {
+      return { cancelled: true };
+    }
     console.warn("[transly] article audit failed", error);
     showToast(`AI audit failed: ${String(error?.message || error)}`, { tone: "error", timeout: 4000 });
     audit = {
@@ -233,12 +272,128 @@ async function translateArticle(targetLanguage) {
       error: String(error?.message || error)
     };
   }
+  if (audit.cancelled || runId !== articleRunId || clientRequestId !== activeArticleClientRunId) {
+    return { cancelled: true };
+  }
   translatedCount += audit.repairedCount;
 
   showToast(`Article translation complete: ${translatedCount}/${segments.length + audit.repairedCount} blocks.`, {
     timeout: 3500
   });
-  return { translatedCount, segmentCount: segments.length, batchCount: batches.length, audit };
+  return { translatedCount, segmentCount: segments.length, batchCount: batchPlans.length, audit };
+}
+
+async function translateArticleBatches({
+  runId,
+  clientRequestId,
+  targetLanguage,
+  segments,
+  context,
+  batchPlans
+}) {
+  const plans = prioritizeArticleBatches(batchPlans);
+
+  showToast(`Translating ${segments.length} article blocks in ${plans.length} batch${plans.length === 1 ? "" : "es"}...`);
+
+  const isActive = () => runId === articleRunId && clientRequestId === activeArticleClientRunId;
+  const results = await Promise.allSettled(plans.map(async (plan) => {
+    if (!isActive()) return 0;
+    return translateArticleBatch({
+      plan,
+      runId,
+      clientRequestId,
+      targetLanguage,
+      segments,
+      context
+    });
+  }));
+
+  if (!isActive()) return { translatedCount: 0, cancelled: true };
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
+  return {
+    translatedCount: results.reduce((sum, result) => sum + result.value, 0),
+    cancelled: false
+  };
+}
+
+async function translateArticleBatch({
+  plan,
+  runId,
+  clientRequestId,
+  targetLanguage,
+  segments,
+  context
+}) {
+  const batch = plan.items;
+  markBatch(batch, "working");
+  showToast(`Article batch ${plan.batchIndex}/${plan.batchCount}...`);
+
+  try {
+    const cacheKey = await sha256([
+      "article",
+      location.href,
+      targetLanguage,
+      batch.map((item) => `${item.id}:${item.text}`).join("\n")
+    ].join("\n"));
+    const response = await requestTranslation({
+      mode: "article",
+      phase: "translate",
+      clientRequestId,
+      batchIndex: plan.batchIndex,
+      batchCount: plan.batchCount,
+      sourceBlockCount: segments.length,
+      targetLanguage,
+      url: location.href,
+      title: document.title,
+      context,
+      cacheKey,
+      items: batch.map(({ id, text }) => ({ id, text }))
+    });
+    if (runId !== articleRunId || clientRequestId !== activeArticleClientRunId) return 0;
+    const translatedCount = renderArticleTranslations(batch, response.items || [], targetLanguage);
+    markBatch(batch, "done");
+    return translatedCount;
+  } catch (error) {
+    if (runId === articleRunId && clientRequestId === activeArticleClientRunId) {
+      markFailedBatch(batch);
+    }
+    throw error;
+  }
+}
+
+function prioritizeArticleBatches(batchPlans) {
+  const viewportTop = window.scrollY;
+  const viewportBottom = viewportTop + window.innerHeight;
+  return [...batchPlans].sort((left, right) => (
+    getBatchViewportDistance(left, viewportTop, viewportBottom)
+    - getBatchViewportDistance(right, viewportTop, viewportBottom)
+  ));
+}
+
+function getBatchViewportDistance(plan, viewportTop, viewportBottom) {
+  let distance = Number.POSITIVE_INFINITY;
+  for (const item of plan.items || []) {
+    const rect = item.element?.getBoundingClientRect?.();
+    if (!rect) continue;
+    const top = rect.top + window.scrollY;
+    const bottom = rect.bottom + window.scrollY;
+    if (bottom >= viewportTop && top <= viewportBottom) return 0;
+    distance = Math.min(distance, top > viewportBottom ? top - viewportBottom : viewportTop - bottom);
+  }
+  return distance;
+}
+
+function setArticleRuntimeState(status, options = {}) {
+  const now = new Date().toISOString();
+  articleRuntimeState = {
+    status,
+    startedAt: status === "running" ? now : articleRuntimeState.startedAt,
+    finishedAt: status === "running" ? null : now,
+    error: options.error || null
+  };
+  if (options.clientRequestId) activeArticleClientRunId = options.clientRequestId;
+  document.documentElement.dataset.translyArticleStatus = status;
 }
 
 function getArticleRule() {
@@ -413,38 +568,23 @@ function shouldTranslateText(text, element, rule) {
 }
 
 function buildArticleContext(segments, maxChars) {
-  const headings = [...document.querySelectorAll("h1,h2,h3")]
-    .filter((element) => isVisible(element) && !isExcludedElement(element, ARTICLE_GENERIC_RULE))
-    .map((element) => compactText(element.innerText || element.textContent))
-    .filter(Boolean)
-    .slice(0, 30);
-
   const orderedText = segments
-    .map((item) => `[${item.id}] ${item.plainText || item.text}`)
-    .join("\n")
+    .map((item) => item.plainText || item.text)
+    .join("\n\n")
     .slice(0, maxChars);
 
   return [
-    `Title: ${document.title}`,
-    `URL: ${location.href}`,
-    headings.length ? `Headings:\n${headings.join("\n")}` : "",
-    `Full article text in page order, capped at ${maxChars} chars:\n${orderedText}`
+    document.title,
+    orderedText
   ].filter(Boolean).join("\n\n");
 }
 
 function buildFallbackArticleContext(root) {
-  const headings = [...document.querySelectorAll("h1,h2,h3")]
-    .filter((element) => isVisible(element))
-    .map((element) => compactText(element.innerText || element.textContent))
-    .filter(Boolean)
-    .slice(0, 30);
   const rootText = compactText(root?.innerText || document.body?.innerText || "").slice(0, ARTICLE_CONTEXT_CHARS);
 
   return [
-    `Title: ${document.title}`,
-    `URL: ${location.href}`,
-    headings.length ? `Headings:\n${headings.join("\n")}` : "",
-    rootText ? `Visible page text sample:\n${rootText}` : ""
+    document.title,
+    rootText
   ].filter(Boolean).join("\n\n");
 }
 
@@ -454,6 +594,11 @@ function renderArticleTranslations(batch, translations, targetLanguage) {
 
   for (const item of batch) {
     const translation = normalizeMultilineText(byId.get(item.id));
+    const existing = getTranslationNode(item.element);
+    if (translation && existing?.translyTranslationText === translation) {
+      count++;
+      continue;
+    }
     removeExistingTranslation(item.element);
     if (!translation) continue;
 
@@ -468,7 +613,7 @@ function renderArticleTranslations(batch, translations, targetLanguage) {
   return count;
 }
 
-async function runArticleAuditRepair({ runId, phase, targetLanguage, root, rule, translatedSegments, settings, context }) {
+async function runArticleAuditRepair({ runId, phase, targetLanguage, clientRequestId, root, rule, translatedSegments, settings, context }) {
   if (settings.enableArticleAuditLoop === false) return { enabled: false, repairedCount: 0, actionCount: 0 };
   if (runId !== articleRunId) return { enabled: true, cancelled: true, repairedCount: 0, actionCount: 0 };
 
@@ -481,6 +626,9 @@ async function runArticleAuditRepair({ runId, phase, targetLanguage, root, rule,
   showToast(phase === "initial" ? "AI is checking article blocks..." : "AI is checking translation coverage...");
   const response = await requestArticleAudit({
     mode: "article-audit",
+    phase,
+    clientRequestId,
+    sourceBlockCount: translatedSegments.length,
     targetLanguage,
     url: location.href,
     title: document.title,
@@ -488,6 +636,9 @@ async function runArticleAuditRepair({ runId, phase, targetLanguage, root, rule,
     summary: audit.summary,
     blocks: audit.blocks
   });
+  if (runId !== articleRunId || clientRequestId !== activeArticleClientRunId) {
+    return { enabled: true, cancelled: true, repairedCount: 0, actionCount: 0 };
+  }
 
   const maxRepairItems = Number(settings.articleAuditMaxRepairItems || ARTICLE_AUDIT_MAX_REPAIR_ITEMS);
   const repairIds = new Set((response.actions || [])
@@ -499,7 +650,6 @@ async function runArticleAuditRepair({ runId, phase, targetLanguage, root, rule,
     .filter((item) => repairIds.has(item.auditId))
     .slice(0, maxRepairItems)
     .map((item, index) => prepareRepairSegment(item, index));
-
   if (!repairItems.length) {
     return {
       enabled: true,
@@ -518,13 +668,14 @@ async function runArticleAuditRepair({ runId, phase, targetLanguage, root, rule,
       targetLanguage,
       repairItems.map((item) => `${item.id}:${item.text}`).join("\n")
     ].join("\n"));
-    const repairContext = [
-      context || buildFallbackArticleContext(root),
-      "",
-      "AI audit selected these visible blocks for repair after checking translation coverage."
-    ].join("\n");
+    const repairContext = context || buildFallbackArticleContext(root);
     const translated = await requestTranslation({
       mode: "article",
+      phase: "audit-repair",
+      clientRequestId,
+      batchIndex: 1,
+      batchCount: 1,
+      sourceBlockCount: translatedSegments.length,
       targetLanguage,
       url: location.href,
       title: document.title,
@@ -532,6 +683,9 @@ async function runArticleAuditRepair({ runId, phase, targetLanguage, root, rule,
       cacheKey,
       items: repairItems.map(({ id, text }) => ({ id, text }))
     });
+    if (runId !== articleRunId || clientRequestId !== activeArticleClientRunId) {
+      return { enabled: true, cancelled: true, repairedCount: 0, actionCount: 0 };
+    }
     const repairedCount = renderArticleTranslations(repairItems, translated.items || [], targetLanguage);
     markBatch(repairItems, "done");
     return {
@@ -657,7 +811,7 @@ function collectAuditCandidates(root, rule) {
   const textLeaves = collectAuditTextLeaves(root, auditRule);
   return sortByDocumentOrder(uniqueElements([...primary, ...fallback, ...textLeaves]))
     .filter((element) => !safeClosest(element, ".transly-translation"))
-    .slice(0, ARTICLE_MAX_ITEMS * 2);
+    .slice(0, ARTICLE_AUDIT_MAX_CANDIDATES);
 }
 
 function collectAuditTextLeaves(root, auditRule) {
@@ -678,7 +832,7 @@ function collectAuditTextLeaves(root, auditRule) {
   });
   const elements = [];
   let node = walker.nextNode();
-  while (node && elements.length < ARTICLE_MAX_ITEMS * 2) {
+  while (node && elements.length < ARTICLE_AUDIT_MAX_CANDIDATES) {
     elements.push(node);
     node = walker.nextNode();
   }
@@ -750,6 +904,15 @@ function markBatch(batch, state) {
   }
 }
 
+function markFailedBatch(batch) {
+  for (const item of batch) {
+    item.element.classList.remove("transly-working");
+    item.element.classList.add("transly-error");
+    const translation = getTranslationNode(item.element);
+    if (translation?.classList.contains("transly-loading")) removeExistingTranslation(item.element);
+  }
+}
+
 function ensureLoadingTranslation(item) {
   removeExistingTranslation(item.element);
   const node = createTranslationNode(item, {
@@ -779,6 +942,7 @@ function createTranslationNode(item, options = {}) {
   node.setAttribute("translate", "no");
   if (options.targetLanguage) node.setAttribute("lang", options.targetLanguage);
   if (options.loading) node.classList.add("transly-loading");
+  if (!options.loading && options.text) node.translyTranslationText = options.text;
 
   const block = document.createElement("span");
   block.className = "transly-translation-block-wrapper";
@@ -794,32 +958,85 @@ function createTranslationNode(item, options = {}) {
   node.appendChild(block);
   item.element.dataset.translyArticleId = item.id;
   item.element.dataset.translyTranslated = "true";
+  updateTranslationRevealState(node, item.element);
   return node;
 }
 
+async function initializeArticleDisplayMode() {
+  const settings = await getSettings();
+  setArticleDisplayMode(settings.articleDisplayMode);
+}
+
+function setArticleDisplayMode(mode) {
+  articleDisplayMode = mode === "translation-only" ? "translation-only" : "bilingual";
+  document.documentElement.dataset.translyArticleDisplayMode = articleDisplayMode;
+  if (articleDisplayMode === "bilingual") {
+    document.querySelectorAll(".transly-source-revealed").forEach((source) => {
+      source.classList.remove("transly-source-revealed");
+    });
+  }
+  document.querySelectorAll(".transly-translation").forEach((translation) => {
+    const source = getSourceForTranslation(translation);
+    if (source) updateTranslationRevealState(translation, source);
+  });
+}
+
+function handleTranslationRevealClick(event) {
+  if (articleDisplayMode !== "translation-only") return;
+  if (event.target.closest("a, button, input, select, textarea")) return;
+  if (window.getSelection()?.toString()) return;
+  const translation = event.target.closest(".transly-translation:not(.transly-loading)");
+  if (!translation) return;
+  const source = getSourceForTranslation(translation);
+  if (!source) return;
+  source.classList.toggle("transly-source-revealed");
+  updateTranslationRevealState(translation, source);
+}
+
+function getSourceForTranslation(translation) {
+  const source = translation?.previousElementSibling;
+  if (!source || source.dataset.translyArticleId !== translation.dataset.translyFor) return null;
+  return source;
+}
+
+function updateTranslationRevealState(translation, source) {
+  if (articleDisplayMode !== "translation-only" || translation.classList.contains("transly-loading")) {
+    translation.classList.remove("transly-can-reveal-source");
+    translation.removeAttribute("title");
+    return;
+  }
+  const revealed = source.classList.contains("transly-source-revealed");
+  translation.classList.add("transly-can-reveal-source");
+  translation.title = revealed ? "Click to hide original" : "Click to show original";
+}
+
 function insertTranslationNode(source, node) {
-  attachTranslationSpacing(source, node);
+  attachTranslationPresentation(source, node);
   source.insertAdjacentElement("afterend", node);
 }
 
-function attachTranslationSpacing(source, node) {
+function attachTranslationPresentation(source, node) {
   if (!source || !node) return;
+  restoreTranslationSpacing(source);
   const style = getComputedStyle(source);
   const sourceMarginBottom = parseFloat(style.marginBottom) || 0;
   const sourceFontSize = parseFloat(style.fontSize) || 16;
-  if (sourceMarginBottom < sourceFontSize * 0.35) return;
-
-  if (!source.dataset.translyOriginalMarginBottomStyle) {
-    source.dataset.translyOriginalMarginBottomStyle = source.style.marginBottom || " ";
+  const copiedProperties = [
+    "color",
+    "fontSize",
+    "fontWeight",
+    "fontStyle",
+    "lineHeight",
+    "letterSpacing",
+    "textAlign"
+  ];
+  for (const property of copiedProperties) {
+    if (style[property]) node.style[property] = style[property];
   }
-  if (!source.dataset.translyOriginalMarginBottomPx) {
-    source.dataset.translyOriginalMarginBottomPx = String(sourceMarginBottom);
-  }
 
-  const compactGap = Math.min(10, Math.max(4, sourceFontSize * 0.22));
-  const translationBottomGap = Math.max(0, sourceMarginBottom - compactGap);
-  source.style.marginBottom = `${compactGap}px`;
-  node.style.marginBottom = `${translationBottomGap}px`;
+  const fallbackGap = Math.min(16, Math.max(8, sourceFontSize * 0.34));
+  node.style.marginTop = sourceMarginBottom >= sourceFontSize * 0.35 ? "0px" : `${fallbackGap}px`;
+  if (sourceMarginBottom > 0) node.style.marginBottom = `${sourceMarginBottom}px`;
 }
 
 function restoreTranslationSpacing(source) {
@@ -905,7 +1122,7 @@ function clearArticleTranslations(options = {}) {
   if (options.cancelActiveRun !== false) articleRunId++;
   document.querySelectorAll(".transly-translation").forEach((node) => node.remove());
   document.querySelectorAll("[data-transly-article-id]").forEach((node) => {
-    node.classList.remove("transly-working", "transly-error");
+    node.classList.remove("transly-working", "transly-error", "transly-source-revealed");
     restoreTranslationSpacing(node);
     delete node.dataset.translyArticleId;
     delete node.dataset.translyTranslated;
@@ -917,10 +1134,8 @@ function extractRichText(element) {
   const protectedElements = [...element.querySelectorAll(ARTICLE_PROTECTED_INLINE_SELECTOR)]
     .filter((node) => !safeClosest(node.parentElement, ARTICLE_PROTECTED_INLINE_SELECTOR));
   if (!protectedElements.length) {
-    const placeholders = [];
-    const rawText = normalizeMultilineText(element.innerText || element.textContent);
-    const text = encodeLineBreakPlaceholders(rawText, placeholders);
-    return { text, plainText: compactText(rawText), placeholders };
+    const text = compactText(element.innerText || element.textContent);
+    return { text, plainText: text, placeholders: [] };
   }
 
   const clone = element.cloneNode(true);
@@ -931,6 +1146,12 @@ function extractRichText(element) {
   cloneProtected.forEach((node, index) => {
     const original = protectedElements[index];
     if (!original) return;
+    if (safeMatches(original, "br")) {
+      const token = `${ARTICLE_PLACEHOLDER_PREFIX}${placeholders.length}]]`;
+      placeholders.push({ type: "lineBreak", value: "\n" });
+      node.replaceWith(document.createTextNode(` ${token} `));
+      return;
+    }
     if (safeMatches(original, "a[href]")) {
       const startToken = `${ARTICLE_PLACEHOLDER_PREFIX}${placeholders.length}]]`;
       placeholders.push({
@@ -940,7 +1161,7 @@ function extractRichText(element) {
       });
       const endToken = `${ARTICLE_PLACEHOLDER_PREFIX}${placeholders.length}]]`;
       placeholders.push({ type: "linkEnd" });
-      const linkText = normalizeMultilineText(original.innerText || original.textContent || original.href);
+      const linkText = compactText(original.innerText || original.textContent || original.href);
       node.replaceWith(document.createTextNode(` ${startToken} ${linkText} ${endToken} `));
       return;
     }
@@ -950,12 +1171,11 @@ function extractRichText(element) {
     node.replaceWith(document.createTextNode(` ${token} `));
   });
 
-  const rawText = normalizeMultilineText(clone.innerText || clone.textContent);
-  const text = encodeLineBreakPlaceholders(rawText, placeholders);
-  const plainText = normalizeMultilineText(element.innerText || element.textContent);
+  const text = compactText(clone.textContent);
+  const plainText = compactText(element.innerText || element.textContent);
   return {
     text,
-    plainText: compactText(plainText),
+    plainText,
     placeholders
   };
 }
@@ -1024,10 +1244,6 @@ function showToast(text, options = {}) {
   }, options.timeout || 2600);
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function sha256(input) {
   const bytes = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -1048,39 +1264,8 @@ function normalizeMultilineText(text) {
     .trim();
 }
 
-function encodeLineBreakPlaceholders(text, placeholders) {
-  return normalizeMultilineText(text).replace(/\n+/g, (lineBreaks) => {
-    const token = `${ARTICLE_PLACEHOLDER_PREFIX}${placeholders.length}]]`;
-    placeholders.push({
-      type: "lineBreak",
-      value: lineBreaks.length > 1 ? "\n\n" : "\n"
-    });
-    return ` ${token} `;
-  });
-}
-
 function normalizeDuplicateKey(text) {
   return compactText(text).toLowerCase().slice(0, 400);
-}
-
-function chunkItems(items, maxChars) {
-  const chunks = [];
-  let current = [];
-  let size = 0;
-  const limit = Math.max(3000, maxChars || ARTICLE_BATCH_CHARS);
-
-  for (const item of items) {
-    const itemSize = item.text.length + item.id.length + 64;
-    if (current.length && size + itemSize > limit) {
-      chunks.push(current);
-      current = [];
-      size = 0;
-    }
-    current.push(item);
-    size += itemSize;
-  }
-  if (current.length) chunks.push(current);
-  return chunks;
 }
 
 function uniqueElements(elements) {
@@ -1190,3 +1375,4 @@ function describeElement(element) {
   }
   return parts.join(" > ");
 }
+})();

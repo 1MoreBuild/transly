@@ -67,7 +67,7 @@ Our implication:
 
 - We do not need its full iframe policy for v1.
 - We should still run `all_frames: true` for subtitles because embedded players often live in iframes.
-- For article translation, top frame is enough unless the user explicitly triggers an iframe.
+- For article translation, inspect all frames only after an explicit user action and route the command to the strongest article candidate rather than translating every frame.
 
 ## Config Model
 
@@ -352,7 +352,7 @@ It also has a strict rate limiter:
 Our implication:
 
 - Its small-request design is correct for paid APIs, but wrong for Codex subscription auth because many small calls hit rate limits faster.
-- Our bridge should serialize requests, batch aggressively, and cache by URL/language/text hash.
+- Our Native Host should be the single concurrency authority, run at most five requests at once, and cache by URL/language/text hash.
 - Langfuse should trace one high-level translate request plus each model batch.
 
 ## Subtitle Architecture
@@ -483,7 +483,7 @@ Borrow:
 - Leaf block fallback for modern `div`-based articles.
 - Separate internal cue model.
 - Reversible rendering.
-- Cache and serialized model calls.
+- Cache plus one explicit Native Host concurrency limit.
 
 Do not borrow:
 
@@ -493,11 +493,11 @@ Do not borrow:
 - 178 site-specific subtitle rules in v1.
 - Its class names, UI assets, provider adapters, or copied code.
 
-## Immediate Fix Suggested For Our Code
+## Historical Extraction Fix
 
 The screenshot error `No article text found.` likely comes from our extractor being narrower than Immersive Translate's article detection.
 
-Our current v1 should add:
+The first implementation needed:
 
 - Strict pass: headings, paragraphs, list items, blockquotes, captions, table cells.
 - Fallback pass: visible leaf block-like `div/section/article/main` nodes with enough text.
@@ -505,4 +505,4 @@ Our current v1 should add:
 - A max fallback block size so we do not translate a huge wrapper as one paragraph.
 - Full article context sent once per batch.
 
-This aligns with Immersive Translate's idea but is simpler and better suited to Codex subscription calls.
+These extraction layers are now implemented, with an AI audit as the repair path when deterministic extraction misses visible article content.

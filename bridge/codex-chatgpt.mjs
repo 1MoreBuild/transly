@@ -20,10 +20,11 @@ let modelCatalogPromise = null;
 export const DEFAULT_CODEX_CHATGPT_MODEL = "gpt-5.6-luna";
 
 export async function translateViaCodexChatGpt(prompt, options = {}) {
+  const requestStartedAt = Date.now();
   const credentials = await readFreshCodexCredentials();
   const accountId = resolveAccountId(credentials);
   const model = normalizeModel(options.model || DEFAULT_CODEX_CHATGPT_MODEL);
-  const runtime = await resolveModelRuntime(model);
+  const runtime = await resolveModelRuntime(model, options.reasoningEffort);
   const requestId = options.sessionId || randomUUID();
   const endpoint = resolveCodexUrl(options.baseUrl || process.env.TRANSLY_CODEX_BASE_URL);
 
@@ -31,7 +32,7 @@ export async function translateViaCodexChatGpt(prompt, options = {}) {
     model,
     store: false,
     stream: true,
-    instructions: "You are a precise translation engine. Return only the requested JSON.",
+    instructions: options.instructions || "Follow the user's task exactly and return only the requested JSON.",
     input: [
       {
         role: "user",
@@ -60,7 +61,8 @@ export async function translateViaCodexChatGpt(prompt, options = {}) {
     throw new Error(formatCodexError(response.status, response.statusText, text));
   }
 
-  const parsed = await readCodexSse(response);
+  const headersReceivedMs = Date.now() - requestStartedAt;
+  const parsed = await readCodexSse(response, requestStartedAt, options.onTextDelta);
   return {
     model,
     endpoint,
@@ -68,7 +70,14 @@ export async function translateViaCodexChatGpt(prompt, options = {}) {
     outputText: parsed.text,
     eventCount: parsed.eventCount,
     responseId: parsed.responseId,
-    responseStatus: parsed.responseStatus
+    responseStatus: parsed.responseStatus,
+    reasoningEffort: runtime.reasoningEffort,
+    timings: {
+      headersReceivedMs,
+      firstEventMs: parsed.firstEventMs,
+      firstTextDeltaMs: parsed.firstTextDeltaMs,
+      totalMs: Date.now() - requestStartedAt
+    }
   };
 }
 
@@ -293,14 +302,22 @@ function buildSseHeaders(token, accountId, requestId, runtime) {
   return headers;
 }
 
-async function resolveModelRuntime(model) {
+async function resolveModelRuntime(model, preferredReasoningEffort) {
   const catalog = await readModelCatalog();
   const info = catalog?.models?.find((item) => normalizeModel(item?.slug) === model);
+  const supportedReasoningLevels = Array.isArray(info?.supported_reasoning_levels)
+    ? info.supported_reasoning_levels.map((item) => String(item?.effort || "")).filter(Boolean)
+    : [];
+  const requestedReasoningEffort = String(preferredReasoningEffort || "").trim().toLowerCase();
+  const reasoningEffort = requestedReasoningEffort
+    && (!supportedReasoningLevels.length || supportedReasoningLevels.includes(requestedReasoningEffort))
+      ? requestedReasoningEffort
+      : String(info?.default_reasoning_level || "medium");
   return {
     responsesLite: typeof info?.use_responses_lite === "boolean"
       ? info.use_responses_lite
       : RESPONSES_LITE_MODELS.has(model),
-    reasoningEffort: String(info?.default_reasoning_level || "medium"),
+    reasoningEffort,
     clientVersion: String(catalog?.client_version || process.env.TRANSLY_CODEX_CLIENT_VERSION || "unknown")
   };
 }
@@ -315,14 +332,17 @@ async function readModelCatalog() {
   return modelCatalogPromise;
 }
 
-async function readCodexSse(response) {
+async function readCodexSse(response, requestStartedAt, onTextDelta) {
   let eventCount = 0;
   let outputText = "";
   let responseId = null;
   let responseStatus = null;
+  let firstEventMs = null;
+  let firstTextDeltaMs = null;
 
   for await (const event of parseSse(response)) {
     eventCount++;
+    if (firstEventMs == null) firstEventMs = Date.now() - requestStartedAt;
     const type = typeof event.type === "string" ? event.type : "";
     if (type === "error") {
       throw new Error(`Codex error: ${event.message || event.code || JSON.stringify(event)}`);
@@ -332,7 +352,9 @@ async function readCodexSse(response) {
       throw new Error(`Codex response failed: ${err?.message || err?.code || JSON.stringify(event)}`);
     }
     if (type === "response.output_text.delta" && typeof event.delta === "string") {
+      if (firstTextDeltaMs == null) firstTextDeltaMs = Date.now() - requestStartedAt;
       outputText += event.delta;
+      if (typeof onTextDelta === "function") onTextDelta(event.delta);
     }
     if (event.response && typeof event.response === "object") {
       responseId = event.response.id || responseId;
@@ -346,7 +368,9 @@ async function readCodexSse(response) {
     text: outputText,
     eventCount,
     responseId,
-    responseStatus
+    responseStatus,
+    firstEventMs,
+    firstTextDeltaMs
   };
 }
 

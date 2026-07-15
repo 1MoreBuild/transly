@@ -46,8 +46,8 @@ Implication for this project:
 - We should extract article-level context first.
 - We should batch paragraphs into fewer requests.
 - We should render per paragraph so the UI remains readable.
-- We should use a small local site-rule table plus a robust generic fallback instead of copying hundreds of site rules.
-- Current site-rule notes live in `docs/site-rules.md`.
+- We should use semantic hints, a robust generic fallback, and an AI audit instead of copying hundreds of site rules.
+- Current content-detection notes live in `docs/site-rules.md`.
 
 ## Article Rendering Implementation Notes
 
@@ -56,7 +56,7 @@ Implemented local rendering now follows the Immersive Translate shape more close
 - Translation nodes are inserted as a stable wrapper after the source block.
 - The wrapper is `notranslate` and contains a block wrapper plus an inner translation element.
 - Loading uses the same wrapper location as the final translation and is replaced in place.
-- Default visual style inherits from the page and uses mild opacity instead of a fixed blue color.
+- Default visual style copies a safe typography subset from the source block at full opacity instead of applying a fixed translation color.
 - Links and protected inline elements such as `code`, `kbd`, `math`, `svg`, `img`, `sub`, `sup`, and explicit no-translate nodes are replaced with `[[TRANSLY_PH_n]]` placeholders before translation.
 - The bridge prompt tells the model to preserve placeholder tokens exactly.
 - The content script rehydrates links with their original destination and computed link style, and restores protected inline nodes from local DOM clones.

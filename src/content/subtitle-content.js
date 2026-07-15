@@ -1,3 +1,4 @@
+(function initializeSubtitleContentScript() {
 const SUBTITLE_BATCH_CHARS = 9000;
 const SUBTITLE_CAPTURE_MAX_CHARS = 2_000_000;
 const SUBTITLE_MAX_CUES = 5000;
@@ -11,13 +12,22 @@ let renderTimer = null;
 let subtitleTranslationTimer = null;
 let subtitleRunId = 0;
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "TRANSLY_ENABLE_SUBTITLES") {
     subtitleEnabled = true;
     targetLanguage = message.targetLanguage || "zh-CN";
+    document.documentElement.dataset.translySubtitlesEnabled = "true";
     injectSubtitleHook();
     ensureCaptionWindow();
     if (activeCues.length) scheduleSubtitleTranslation(activeCues);
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message?.type === "TRANSLY_DISABLE_SUBTITLES") {
+    disableSubtitles();
+    sendResponse({ ok: true });
+    return true;
   }
 });
 
@@ -64,11 +74,15 @@ async function translateCues(cues, runId) {
   const batches = chunkItems(cues, Number(settings.subtitleBatchChars || SUBTITLE_BATCH_CHARS));
   const context = buildSubtitleContext(cues);
 
-  for (const batch of batches) {
+  const results = await Promise.allSettled(batches.map(async (batch, index) => {
     if (runId !== subtitleRunId) return;
     const cacheKey = await sha256(`${location.href}\n${targetLanguage}\n${batch.map((x) => x.text).join("\n")}`);
     const response = await requestTranslation({
       mode: "subtitle",
+      phase: "translate",
+      batchIndex: index + 1,
+      batchCount: batches.length,
+      sourceBlockCount: cues.length,
       targetLanguage,
       url: location.href,
       title: document.title,
@@ -81,8 +95,9 @@ async function translateCues(cues, runId) {
     for (const item of response.items || []) {
       if (item.id && item.translation) translatedById.set(item.id, compactText(item.translation));
     }
-    await sleep(Number(settings.minDelayMs || 1500));
-  }
+  }));
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
 }
 
 function parseSubtitle(body, url) {
@@ -168,6 +183,17 @@ function ensureCaptionWindow() {
   if (!renderTimer) renderTimer = setInterval(renderCaption, 200);
 }
 
+function disableSubtitles() {
+  subtitleEnabled = false;
+  subtitleRunId++;
+  document.documentElement.dataset.translySubtitlesEnabled = "false";
+  clearTimeout(subtitleTranslationTimer);
+  subtitleTranslationTimer = null;
+  clearInterval(renderTimer);
+  renderTimer = null;
+  document.querySelector("#transly-caption-window")?.remove();
+}
+
 function renderCaption() {
   const video = document.querySelector("video");
   const windowEl = document.querySelector("#transly-caption-window");
@@ -188,10 +214,9 @@ function renderCaption() {
 function buildSubtitleContext(cues) {
   const sample = cues.map((cue) => cue.text).join("\n").slice(0, 18000);
   return [
-    `Title: ${document.title}`,
-    `URL: ${location.href}`,
-    `Subtitle sample:\n${sample}`
-  ].join("\n\n");
+    document.title,
+    sample
+  ].filter(Boolean).join("\n\n");
 }
 
 function requestTranslation(payload) {
@@ -238,7 +263,4 @@ function chunkItems(items, maxChars) {
   if (current.length) chunks.push(current);
   return chunks;
 }
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+})();

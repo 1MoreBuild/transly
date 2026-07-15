@@ -31,7 +31,13 @@ export function requestNativeHost(launcher, origin, type, payload = {}, options 
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     createNativeMessageReader(child.stdout, {
-      onMessage(message) { finish(null, message); },
+      onMessage(message) {
+        if (message?.progress) {
+          options.onProgress?.(message.data);
+          return;
+        }
+        finish(null, message);
+      },
       onError(error) { finish(error); }
     });
     child.on("error", (error) => finish(error));

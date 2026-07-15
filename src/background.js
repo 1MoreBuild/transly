@@ -1,7 +1,6 @@
 const NATIVE_HOST_NAME = "com.1morebuild.transly";
 const NATIVE_PROTOCOL_VERSION = 1;
 const NATIVE_IDLE_TIMEOUT_MS = 60_000;
-const NATIVE_REQUEST_TIMEOUT_MS = 190_000;
 const MAX_NATIVE_PAYLOAD_CHARS = 1_800_000;
 
 let nativePort = null;
@@ -37,13 +36,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.sync.get(
       {
         targetLanguage: "zh-CN",
+        articleDisplayMode: "bilingual",
         articleBatchChars: 28000,
+        articleBatchMaxItems: 28,
         articleContextChars: 36000,
         enableArticleAuditLoop: true,
         articleAuditMaxBlocks: 60,
         articleAuditMaxRepairItems: 20,
-        subtitleBatchChars: 9000,
-        minDelayMs: 500
+        subtitleBatchChars: 9000
       },
       (settings) => sendResponse({ ok: true, data: settings })
     );
@@ -65,11 +65,13 @@ function postNativeRequest(type, payload = {}) {
   clearTimeout(idleTimer);
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      if (!pendingRequests.delete(id)) return;
-      reject(nativeRequestError("NATIVE_REQUEST_TIMEOUT", "Native translation request timed out."));
-      scheduleNativePortClose();
-    }, type === "health" ? 15_000 : NATIVE_REQUEST_TIMEOUT_MS);
+    const timeout = type === "health"
+      ? setTimeout(() => {
+          if (!pendingRequests.delete(id)) return;
+          reject(nativeRequestError("NATIVE_REQUEST_TIMEOUT", "Native health check timed out."));
+          scheduleNativePortClose();
+        }, 15_000)
+      : null;
     pendingRequests.set(id, { resolve, reject, timeout });
     try {
       port.postMessage({
@@ -152,6 +154,7 @@ function getNativePort() {
     if (message?.protocolVersion !== NATIVE_PROTOCOL_VERSION || typeof message.id !== "string") return;
     const pending = pendingRequests.get(message.id);
     if (!pending) return;
+    if (message.progress) return;
     pendingRequests.delete(message.id);
     clearTimeout(pending.timeout);
 

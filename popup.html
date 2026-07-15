@@ -1,65 +1,102 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Codex Translate</title>
-    <style>
-      body {
-        width: 280px;
-        margin: 0;
-        padding: 14px;
-        font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: #1f2933;
-      }
-      label {
-        display: block;
-        margin-bottom: 6px;
-        font-weight: 600;
-      }
-      input {
-        box-sizing: border-box;
-        width: 100%;
-        height: 34px;
-        padding: 6px 8px;
-        border: 1px solid #c9d2dc;
-        border-radius: 6px;
-        font: inherit;
-      }
-      button {
-        width: 100%;
-        height: 36px;
-        margin-top: 10px;
-        border: 0;
-        border-radius: 6px;
-        background: #155eef;
-        color: white;
-        font-weight: 650;
-        cursor: pointer;
-      }
-      button.secondary {
-        background: #eef2f6;
-        color: #1f2933;
-      }
-      #status {
-        min-height: 18px;
-        margin-top: 10px;
-        color: #52606d;
-      }
-      #status[data-tone="ready"] {
-        color: #16794b;
-      }
-      #status[data-tone="error"] {
-        color: #b42318;
-      }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Transly</title>
+    <link rel="stylesheet" href="popup.css">
   </head>
   <body>
-    <label for="targetLanguage">Target language</label>
-    <input id="targetLanguage" value="zh-CN">
-    <button id="translateArticle">Translate article</button>
-    <button id="clearArticle" class="secondary">Clear article translations</button>
-    <button id="enableSubtitles" class="secondary">Enable subtitle overlay</button>
-    <div id="status"></div>
+    <main class="popup-shell">
+      <header class="app-header">
+        <div class="brand">
+          <h1>Transly</h1>
+        </div>
+        <div id="connectionBadge" class="connection-badge" data-state="checking">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="connectionLabel">Checking</span>
+        </div>
+      </header>
+
+      <section class="language-section" aria-labelledby="languageHeading">
+        <h2 id="languageHeading">Language</h2>
+        <div class="language-flow">
+          <div class="language-control" aria-label="Source language: Auto detect">
+            <span class="control-label">From</span>
+            <strong>Auto detect</strong>
+          </div>
+          <span class="flow-arrow" aria-hidden="true">→</span>
+          <label class="language-control" for="targetLanguage">
+            <span class="control-label">To</span>
+            <select id="targetLanguage" aria-label="Target language">
+              <option value="zh-CN">简体中文</option>
+              <option value="zh-TW">繁體中文</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+              <option value="es">Español</option>
+              <option value="de">Deutsch</option>
+              <option value="fr">Français</option>
+              <option value="pt-BR">Português</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="engine-row" aria-label="Translation engine">
+        <div>
+          <span class="section-kicker">Translation engine</span>
+          <strong>Codex subscription</strong>
+        </div>
+        <span id="modelValue" class="model-value">Connecting…</span>
+      </section>
+
+      <section class="primary-action-section">
+        <div class="primary-action-row">
+          <button
+            id="articleDisplayMode"
+            class="display-mode-action"
+            type="button"
+            data-mode="bilingual"
+            data-tooltip="Bilingual view. Switch to translation only."
+            aria-label="Bilingual view. Switch to translation only."
+          >
+            <span class="display-mode-icon" aria-hidden="true">
+              <span class="display-mode-source">文</span>
+              <span class="display-mode-target">A</span>
+            </span>
+          </button>
+          <button id="translateArticle" class="primary-action" type="button">
+            <span>Translate this article</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="feature-list" aria-label="Translation controls">
+        <div class="feature-row">
+          <div class="feature-copy">
+            <strong>Article translation</strong>
+            <span id="articleState">Not translated</span>
+          </div>
+          <button id="clearArticle" class="text-action" type="button" disabled>Clear</button>
+        </div>
+
+        <label class="feature-row" for="subtitleToggle">
+          <div class="feature-copy">
+            <strong>Video subtitles</strong>
+            <span id="subtitleState">Off</span>
+          </div>
+          <span class="switch">
+            <input id="subtitleToggle" type="checkbox" role="switch">
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+      </section>
+
+      <footer class="status-footer">
+        <p id="status" role="status" aria-live="polite">Ready</p>
+      </footer>
+    </main>
     <script src="popup.js"></script>
   </body>
 </html>

@@ -6,7 +6,7 @@ This project is an independent implementation. It is not a fork of Immersive Tra
 
 ## Scope
 
-- Article translation with larger contextual batches and bilingual inline rendering.
+- Article translation in top-level pages and article iframes, with adaptive contextual batches, bilingual and translation-only display modes, and click-to-reveal originals.
 - Video subtitle translation for YouTube timed text, generic WebVTT, and Bilibili subtitle JSON.
 - AI audit of visible article blocks after translation.
 - Langfuse tracing of translation and audit model trajectories.
@@ -40,7 +40,7 @@ Then open `chrome://extensions`, enable Developer Mode, choose **Load unpacked**
 
 The manifest contains a public development key so the unpacked extension ID remains stable. The installer registers a user-level Native Messaging Host that only accepts that exact extension origin.
 
-After source updates that change the Native Host or after moving the repository, run `npm run native:install` again and reload the extension.
+After moving the repository, changing the extension key, or changing the Native Host manifest or launcher, run `npm run native:install` again and reload the extension. Ordinary JavaScript source changes only require reloading the extension.
 
 ## Usage
 
@@ -75,22 +75,25 @@ npm run setup
 npm run native:install
 npm run native:doctor
 npm run native:smoke
+npm run native:smoke:concurrent
+npm run logs -- --limit 80
 npm run native:uninstall
 npm run codex:doctor
 ```
 
-`native:smoke` sends one real GPT-5.6-Luna translation request and therefore consumes subscription capacity. Normal tests and `native:doctor` do not call the model.
+`native:smoke` sends one real GPT-5.6-Luna translation request. `native:smoke:concurrent` sends two. Both consume subscription capacity. Normal tests and `native:doctor` do not call the model.
 
 ## Troubleshooting
 
 - After moving or renaming the cloned directory, rerun `npm run setup` and reload the unpacked extension.
 - If the popup reports `Native host disconnected`, run `npm run native:doctor`, then `npm run native:install` if needed.
+- To inspect the latest redacted Native Host timings, run `npm run logs -- --limit 80`. Logs are stored under `~/Library/Logs/Transly/`; they contain request IDs, phases, item counts, sanitized URLs, and latency metrics, but not article text, prompts, model output, or OAuth credentials.
 - If GPT-5.6-Luna is unavailable for an account, set `TRANSLY_CODEX_MODEL` in `.env.local` to a Codex model available to that account.
 - Chrome must load the repository root, not `src/`, as the unpacked extension directory.
 
 ## Architecture
 
-Content scripts send validated requests to the MV3 background service worker. The service worker opens a task-scoped `chrome.runtime.connectNative()` port. The Native Host owns request serialization, in-memory caching, Codex OAuth, model calls, and Langfuse tracing.
+Content scripts send validated requests to the MV3 background service worker. The service worker opens a task-scoped `chrome.runtime.connectNative()` port. The Native Host owns request scheduling, in-memory caching, Codex OAuth, model calls, and Langfuse tracing.
 
 See [docs/architecture.md](docs/architecture.md) for the protocol and lifecycle.
 

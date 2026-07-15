@@ -4,6 +4,11 @@ import {
   translateViaCodexChatGpt
 } from "./codex-chatgpt.mjs";
 import { loadLocalEnv } from "./env.mjs";
+import { logDiagnostic, summarizeDiagnosticPayload } from "./diagnostics.mjs";
+import { parseJsonOutput } from "./json-output.mjs";
+import { createStreamingStringArrayParser } from "./stream-items.mjs";
+import { assertPlaceholderIntegrity, summarizePlaceholderIntegrity } from "./translation-quality.mjs";
+import { buildTranslationRequest, normalizeTranslationResult } from "./translation-prompt.mjs";
 import {
   estimateUsage,
   initLangfuse,
@@ -18,9 +23,11 @@ loadLocalEnv();
 const langfuseStatus = await initLangfuse();
 
 const CODEX_MODEL = process.env.TRANSLY_CODEX_MODEL || DEFAULT_CODEX_CHATGPT_MODEL;
+const CODEX_REASONING_EFFORT = process.env.TRANSLY_REASONING_EFFORT || "medium";
 const cache = new Map();
+const inFlightTranslations = new Map();
 
-export async function handleServiceRequest(type, payload = {}) {
+export async function handleServiceRequest(type, payload = {}, context = {}) {
   if (type === "health") {
     const credentials = await getCodexCredentialStatus().catch((error) => ({
       available: false,
@@ -30,13 +37,14 @@ export async function handleServiceRequest(type, payload = {}) {
       ok: true,
       provider: "codex-chatgpt-responses",
       model: CODEX_MODEL,
+      reasoningEffort: CODEX_REASONING_EFFORT,
       langfuse: langfuseStatus.enabled,
       credentials
     };
   }
 
   if (type === "audit") {
-    return handleAuditRequest({ ...payload, mode: "article-audit" });
+    return handleAuditRequest({ ...payload, mode: "article-audit" }, context);
   }
 
   if (type !== "translate") {
@@ -52,21 +60,41 @@ export async function handleServiceRequest(type, payload = {}) {
     });
 
     const cached = payload.cacheKey ? cache.get(payload.cacheKey) : null;
+    const inFlight = payload.cacheKey ? inFlightTranslations.get(payload.cacheKey) : null;
     await traceSpan(trace, "cache-lookup", {
       input: { cacheKey: payload.cacheKey || null },
       metadata: { cacheEnabled: Boolean(payload.cacheKey) }
-    }, async () => ({ hit: Boolean(cached) }));
+    }, async () => ({ hit: Boolean(cached), inFlight: Boolean(inFlight) }));
+
+    await logDiagnostic("cache-lookup", {
+      ...summarizeDiagnosticPayload(payload),
+      hit: Boolean(cached),
+      inFlight: Boolean(inFlight)
+    });
 
     if (cached) return cached;
-
-    const translated = await translateWithChatGptCodex(payload, trace);
-    if (payload.cacheKey) {
-      cache.set(payload.cacheKey, translated);
-      await traceSpan(trace, "cache-store", {
-        input: { cacheKey: payload.cacheKey, itemCount: translated.items.length }
-      }, async () => ({ stored: true }));
+    if (inFlight) {
+      return traceSpan(trace, "inflight-join", {
+        metadata: { cacheEnabled: true }
+      }, async () => inFlight);
     }
-    return translated;
+
+    const translation = translateWithChatGptCodex(payload, trace, context);
+    if (payload.cacheKey) inFlightTranslations.set(payload.cacheKey, translation);
+    try {
+      const translated = await translation;
+      if (payload.cacheKey) {
+        cache.set(payload.cacheKey, translated);
+        await traceSpan(trace, "cache-store", {
+          input: { cacheKey: payload.cacheKey, itemCount: translated.items.length }
+        }, async () => ({ stored: true }));
+      }
+      return translated;
+    } finally {
+      if (payload.cacheKey && inFlightTranslations.get(payload.cacheKey) === translation) {
+        inFlightTranslations.delete(payload.cacheKey);
+      }
+    }
   });
 }
 
@@ -99,7 +127,7 @@ function validateAuditPayload(payload) {
   if (payload.blocks.length > 120) throw new Error("Too many audit blocks");
 }
 
-async function handleAuditRequest(payload) {
+async function handleAuditRequest(payload, context) {
   return withTranslateTrace(payload, async (trace) => {
     await traceSpan(trace, "validate-audit-request", {
       input: summarizeAuditPayload(payload)
@@ -112,23 +140,28 @@ async function handleAuditRequest(payload) {
       return { actions: [], notes: ["No blocks to audit."] };
     }
 
-    return auditArticleWithChatGptCodex(payload, trace);
+    return auditArticleWithChatGptCodex(payload, trace, context);
   });
 }
 
-async function translateWithChatGptCodex(payload, trace) {
-  const prompt = await traceSpan(trace, "build-prompt", {
+async function translateWithChatGptCodex(payload, trace, context, attempt = 1) {
+  const request = await traceSpan(trace, "build-prompt", {
     input: summarizePayload(payload),
     metadata: { mode: payload.mode, itemCount: payload.items.length }
-  }, async () => buildPrompt(payload));
+  }, async () => buildTranslationRequest(payload));
+  const { instructions, prompt } = request;
+  const modelInput = `${instructions}\n\n${prompt}`;
 
   const generation = startGeneration(trace, {
     model: CODEX_MODEL,
-    input: prompt,
+    input: request,
     metadata: {
       provider: "codex-chatgpt-responses",
       endpoint: "https://chatgpt.com/backend-api/codex/responses",
       mode: payload.mode,
+      phase: payload.phase,
+      attempt,
+      reasoningEffort: CODEX_REASONING_EFFORT,
       targetLanguage: payload.targetLanguage,
       itemCount: payload.items.length,
       sourceUrl: payload.url
@@ -137,29 +170,76 @@ async function translateWithChatGptCodex(payload, trace) {
 
   let raw = "";
   let responseMeta = {};
+  const streamParser = createStreamingStringArrayParser(payload.items.map((item) => item.id));
+  const modelStartedAt = Date.now();
+  let firstStreamedItemMs = null;
+  let streamedItemCount = 0;
+  await logDiagnostic("model-request-start", {
+    ...summarizeDiagnosticPayload(payload),
+    model: CODEX_MODEL,
+    reasoningEffort: CODEX_REASONING_EFFORT,
+    promptChars: modelInput.length,
+    contextChars: String(payload.context || "").length,
+    translationChars: payload.items.reduce((sum, item) => sum + item.text.length, 0)
+  });
   try {
     const response = await translateViaCodexChatGpt(prompt, {
       model: CODEX_MODEL,
-      sessionId: payload.cacheKey
+      reasoningEffort: CODEX_REASONING_EFFORT,
+      sessionId: payload.cacheKey,
+      instructions,
+      onTextDelta(delta) {
+        const items = streamParser.push(delta)
+          .filter((item) => typeof item.translation === "string")
+          .map((item) => ({ id: item.id, translation: item.translation.trim() }));
+        if (!items.length || typeof context.onProgress !== "function") return;
+        if (firstStreamedItemMs == null) firstStreamedItemMs = Date.now() - modelStartedAt;
+        streamedItemCount += items.length;
+        context.onProgress({
+          type: "translation-items",
+          clientRequestId: payload.clientRequestId || null,
+          mode: payload.mode,
+          phase: payload.phase || null,
+          batchIndex: payload.batchIndex || null,
+          batchCount: payload.batchCount || null,
+          items
+        });
+      }
     });
     raw = response.outputText;
     responseMeta = {
       requestId: response.requestId,
       responseId: response.responseId,
       responseStatus: response.responseStatus,
+      reasoningEffort: response.reasoningEffort,
       eventCount: response.eventCount,
-      rawOutputChars: raw.length
+      rawOutputChars: raw.length,
+      firstStreamedItemMs,
+      streamedItemCount,
+      ...response.timings
     };
+    await logDiagnostic("model-request-complete", {
+      ...summarizeDiagnosticPayload(payload),
+      model: CODEX_MODEL,
+      durationMs: Date.now() - modelStartedAt,
+      ...responseMeta
+    });
     generation.update({
       output: sanitize(raw),
-      usageDetails: estimateUsage(prompt, raw),
+      usageDetails: estimateUsage(modelInput, raw),
       metadata: { status: "ok", usageEstimated: true, ...responseMeta }
     }).end();
   } catch (error) {
+    await logDiagnostic("model-request-error", {
+      ...summarizeDiagnosticPayload(payload),
+      model: CODEX_MODEL,
+      durationMs: Date.now() - modelStartedAt,
+      error: String(error?.message || error)
+    });
     generation.update({
       level: "ERROR",
       output: { error: String(error?.message || error) },
-      usageDetails: estimateUsage(prompt, ""),
+      usageDetails: estimateUsage(modelInput, ""),
       metadata: { status: "error", usageEstimated: true }
     }).end();
     throw error;
@@ -168,30 +248,52 @@ async function translateWithChatGptCodex(payload, trace) {
   const parsed = await traceSpan(trace, "parse-codex-output", {
     input: sanitize(raw),
     metadata: responseMeta
-  }, async () => parseJson(raw));
+  }, async () => parseJsonOutput(raw));
 
-  const result = normalizeResult(parsed, payload);
+  let result = normalizeTranslationResult(parsed, payload);
+  let placeholderIntegrity = summarizePlaceholderIntegrity(payload.items, result.items);
+  await logDiagnostic("translation-quality", {
+    ...summarizeDiagnosticPayload(payload),
+    attempt,
+    ...placeholderIntegrity
+  });
+  if (placeholderIntegrity.affectedItemCount && attempt === 1) {
+    const affectedIds = new Set(placeholderIntegrity.affectedItemIds);
+    const repairPayload = {
+      ...payload,
+      phase: `${payload.phase || "translate"}-placeholder-repair`,
+      cacheKey: null,
+      placeholderRepair: true,
+      items: payload.items.filter((item) => affectedIds.has(item.id))
+    };
+    await logDiagnostic("translation-placeholder-retry", {
+      ...summarizeDiagnosticPayload(repairPayload),
+      missingTokenCount: placeholderIntegrity.missingTokenCount,
+      extraTokenCount: placeholderIntegrity.extraTokenCount
+    });
+    const repaired = await translateWithChatGptCodex(repairPayload, trace, context, attempt + 1);
+    const repairedById = new Map(repaired.items.map((item) => [item.id, item.translation]));
+    result = {
+      items: result.items.map((item) => repairedById.has(item.id)
+        ? { ...item, translation: repairedById.get(item.id) }
+        : item)
+    };
+    placeholderIntegrity = summarizePlaceholderIntegrity(payload.items, result.items);
+  }
+  assertPlaceholderIntegrity(placeholderIntegrity);
   await traceSpan(trace, "normalize-translation-result", {
     input: sanitize(parsed),
-    metadata: { requestedItemCount: payload.items.length }
+    metadata: { requestedItemCount: payload.items.length, ...placeholderIntegrity }
   }, async () => ({
     outputItemCount: result.items.length,
-    missingItemCount: payload.items.length - result.items.length
+    missingItemCount: payload.items.length - result.items.length,
+    placeholderIntegrity
   }));
 
   return result;
 }
 
-function normalizeResult(parsed, payload) {
-  const allowedIds = new Set(payload.items.map((item) => item.id));
-  return {
-      items: (parsed.items || [])
-        .filter((item) => allowedIds.has(item.id))
-        .map((item) => ({ id: item.id, translation: String(item.translation || "").trim() }))
-  };
-}
-
-async function auditArticleWithChatGptCodex(payload, trace) {
+async function auditArticleWithChatGptCodex(payload, trace, _context) {
   const prompt = await traceSpan(trace, "build-audit-prompt", {
     input: summarizeAuditPayload(payload),
     metadata: { blockCount: payload.blocks.length }
@@ -204,6 +306,7 @@ async function auditArticleWithChatGptCodex(payload, trace) {
       provider: "codex-chatgpt-responses",
       endpoint: "https://chatgpt.com/backend-api/codex/responses",
       mode: payload.mode,
+      reasoningEffort: CODEX_REASONING_EFFORT,
       targetLanguage: payload.targetLanguage,
       blockCount: payload.blocks.length,
       sourceUrl: payload.url
@@ -212,9 +315,17 @@ async function auditArticleWithChatGptCodex(payload, trace) {
 
   let raw = "";
   let responseMeta = {};
+  const modelStartedAt = Date.now();
+  await logDiagnostic("model-request-start", {
+    ...summarizeDiagnosticPayload(payload),
+    model: CODEX_MODEL,
+    reasoningEffort: CODEX_REASONING_EFFORT,
+    promptChars: prompt.length
+  });
   try {
     const response = await translateViaCodexChatGpt(prompt, {
       model: CODEX_MODEL,
+      reasoningEffort: CODEX_REASONING_EFFORT,
       sessionId: payload.auditKey || payload.url
     });
     raw = response.outputText;
@@ -222,15 +333,29 @@ async function auditArticleWithChatGptCodex(payload, trace) {
       requestId: response.requestId,
       responseId: response.responseId,
       responseStatus: response.responseStatus,
+      reasoningEffort: response.reasoningEffort,
       eventCount: response.eventCount,
-      rawOutputChars: raw.length
+      rawOutputChars: raw.length,
+      ...response.timings
     };
+    await logDiagnostic("model-request-complete", {
+      ...summarizeDiagnosticPayload(payload),
+      model: CODEX_MODEL,
+      durationMs: Date.now() - modelStartedAt,
+      ...responseMeta
+    });
     generation.update({
       output: sanitize(raw),
       usageDetails: estimateUsage(prompt, raw),
       metadata: { status: "ok", usageEstimated: true, ...responseMeta }
     }).end();
   } catch (error) {
+    await logDiagnostic("model-request-error", {
+      ...summarizeDiagnosticPayload(payload),
+      model: CODEX_MODEL,
+      durationMs: Date.now() - modelStartedAt,
+      error: String(error?.message || error)
+    });
     generation.update({
       level: "ERROR",
       output: { error: String(error?.message || error) },
@@ -243,7 +368,7 @@ async function auditArticleWithChatGptCodex(payload, trace) {
   const parsed = await traceSpan(trace, "parse-audit-output", {
     input: sanitize(raw),
     metadata: responseMeta
-  }, async () => parseJson(raw));
+  }, async () => parseJsonOutput(raw));
 
   const result = normalizeAuditResult(parsed, payload);
   await traceSpan(trace, "normalize-audit-result", {
@@ -271,34 +396,6 @@ function normalizeAuditResult(parsed, payload) {
       })),
     notes: Array.isArray(parsed.notes) ? parsed.notes.map((note) => String(note).slice(0, 500)).slice(0, 8) : []
   };
-}
-
-function buildPrompt(payload) {
-  const compactItems = payload.items.map((item) => ({ id: item.id, text: item.text }));
-  const modeInstruction = payload.mode === "subtitle"
-    ? "For subtitles, keep translations concise enough to read at playback speed."
-    : [
-        "For articles, translate as fluent written prose.",
-        "Use the full context to resolve terminology, pronouns, chronology, and references.",
-        "Some structural boundaries may appear as placeholder tokens; keep those tokens in the translated text at the matching boundary.",
-        "Only translate the items listed in Items JSON; context is for meaning, not for output."
-      ].join(" ");
-  return [
-    "You are a precise translation engine.",
-    `Translate the ${payload.mode} items to ${payload.targetLanguage}.`,
-    "Use the context to preserve terminology, pronouns, tone, and document-level meaning.",
-    "Return only valid JSON. Do not include Markdown fences or commentary.",
-    "The JSON shape must be: {\"items\":[{\"id\":\"...\",\"translation\":\"...\"}]}",
-    "Keep the item count and ids unchanged. Do not merge, split, omit, or reorder items.",
-    "Preserve placeholder tokens like [[TRANSLY_PH_0]] exactly. Do not translate, remove, renumber, or wrap them.",
-    modeInstruction,
-    "",
-    "Context:",
-    payload.context || "",
-    "",
-    "Items JSON:",
-    JSON.stringify(compactItems)
-  ].join("\n");
 }
 
 function buildAuditPrompt(payload) {
@@ -340,28 +437,17 @@ function buildAuditPrompt(payload) {
   ].join("\n");
 }
 
-function parseJson(raw) {
-  const trimmed = raw.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {}
-
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced) return JSON.parse(fenced[1]);
-
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-  if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1));
-
-  throw new Error(`Codex returned non-JSON output: ${trimmed.slice(0, 300)}`);
-}
-
 function summarizePayload(payload) {
   return sanitize({
     mode: payload.mode,
     targetLanguage: payload.targetLanguage,
     url: payload.url,
     title: payload.title,
+    clientRequestId: payload.clientRequestId,
+    phase: payload.phase,
+    batchIndex: payload.batchIndex,
+    batchCount: payload.batchCount,
+    sourceBlockCount: payload.sourceBlockCount,
     itemCount: payload.items?.length || 0,
     totalTextChars: payload.items?.reduce((sum, item) => sum + String(item.text || "").length, 0) || 0,
     cacheKey: payload.cacheKey || null
@@ -374,8 +460,10 @@ function summarizeAuditPayload(payload) {
     targetLanguage: payload.targetLanguage,
     url: payload.url,
     title: payload.title,
+    clientRequestId: payload.clientRequestId,
+    phase: payload.phase || payload.summary?.phase,
+    sourceBlockCount: payload.sourceBlockCount,
     blockCount: payload.blocks?.length || 0,
-    phase: payload.summary?.phase,
     auditKey: payload.auditKey || null
   });
 }

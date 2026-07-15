@@ -52,23 +52,32 @@ export async function withTranslateTrace(payload, fn) {
       input,
       metadata: {
         mode: payload.mode,
+        phase: payload.phase,
+        clientRequestId: payload.clientRequestId,
+        batchIndex: payload.batchIndex,
+        batchCount: payload.batchCount,
+        sourceBlockCount: payload.sourceBlockCount,
         targetLanguage: payload.targetLanguage,
         itemCount: payload.items?.length || 0,
-          sourceUrl: payload.url,
-          provider: "codex-chatgpt-responses"
-        },
-        tags: ["translate", payload.mode || "unknown", "codex-chatgpt-responses"]
+        sourceUrl: payload.url,
+        provider: "codex-chatgpt-responses"
+      },
+      tags: [
+        "translate",
+        payload.mode || "unknown",
+        payload.phase,
+        "codex-chatgpt-responses"
+      ].filter(Boolean)
     });
 
     setActiveTraceIOFn({ input });
 
     return propagateAttributesFn(
       {
-        sessionId: stableSessionId(payload.url),
-        metadata: {
-          app: "transly",
-          provider: "codex-chatgpt-responses"
-        },
+        sessionId: payload.clientRequestId
+          ? `translation-run:${payload.clientRequestId}`
+          : stableSessionId(payload.url),
+        metadata: propagationMetadata(payload),
         traceName: `translate-${payload.mode || "request"}`
       },
       async () => {
@@ -138,6 +147,11 @@ export function sanitize(value) {
 function safeTraceInput(payload) {
   return sanitize({
     mode: payload.mode,
+    phase: payload.phase,
+    clientRequestId: payload.clientRequestId,
+    batchIndex: payload.batchIndex,
+    batchCount: payload.batchCount,
+    sourceBlockCount: payload.sourceBlockCount,
     targetLanguage: payload.targetLanguage,
     url: payload.url,
     title: payload.title,
@@ -181,6 +195,23 @@ function stableSessionId(url) {
   } catch {
     return "page:unknown";
   }
+}
+
+function propagationMetadata(payload) {
+  const values = {
+    app: "transly",
+    provider: "codex-chatgpt-responses",
+    clientRequestId: payload.clientRequestId,
+    phase: payload.phase,
+    batchIndex: payload.batchIndex,
+    batchCount: payload.batchCount,
+    sourceBlockCount: payload.sourceBlockCount
+  };
+  return Object.fromEntries(
+    Object.entries(values)
+      .filter(([, value]) => value != null && value !== "")
+      .map(([key, value]) => [key, String(value)])
+  );
 }
 
 function noopObservation() {

@@ -21,6 +21,7 @@ const hostManifestPath = path.join(
   `${NATIVE_HOST_NAME}.json`
 );
 const hostManifest = JSON.parse(await readFile(hostManifestPath, "utf8"));
+const progressItems = [];
 const result = await requestNativeHost(hostManifest.path, origin, "translate", {
   mode: "article",
   targetLanguage: "zh-CN",
@@ -33,7 +34,10 @@ const result = await requestNativeHost(hostManifest.path, origin, "translate", {
   }]
 }, {
   requestId: "smoke-translate",
-  timeoutMs: 120_000
+  timeoutMs: 210_000,
+  onProgress(data) {
+    progressItems.push(...(data?.items || []));
+  }
 });
 
 if (!result?.ok) {
@@ -43,6 +47,10 @@ if (!result?.ok) {
 const translation = result.data?.items?.find((item) => item.id === "smoke-1")?.translation || "";
 if (!translation || !/[\u3400-\u9fff]/u.test(translation)) {
   throw new Error(`Expected a Chinese translation, received: ${translation || "<empty>"}`);
+}
+const streamedTranslation = progressItems.find((item) => item.id === "smoke-1")?.translation || "";
+if (!streamedTranslation || !/[\u3400-\u9fff]/u.test(streamedTranslation)) {
+  throw new Error("Native translation completed without a valid streaming progress item.");
 }
 
 process.stdout.write(`Native translation OK (${extensionId}): ${translation}\n`);

@@ -16,18 +16,23 @@ const extensionId = extensionIdFromManifestKey(extensionManifest.key);
 const extensionOrigin = `chrome-extension://${extensionId}/`;
 const appDir = path.join(os.homedir(), "Library", "Application Support", "Transly", "native-host");
 const launcherPath = path.join(appDir, "launch.sh");
+const logDir = path.join(os.homedir(), "Library", "Logs", "Transly");
+const stderrLogPath = path.join(logDir, "native-host-stderr.log");
 const chromeHostDir = path.join(os.homedir(), "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts");
 const hostManifestPath = path.join(chromeHostDir, `${NATIVE_HOST_NAME}.json`);
 
 await mkdir(appDir, { recursive: true, mode: 0o700 });
 await mkdir(chromeHostDir, { recursive: true, mode: 0o700 });
+await mkdir(logDir, { recursive: true, mode: 0o700 });
+await writeFile(stderrLogPath, "", { flag: "a", mode: 0o600 });
+await chmod(stderrLogPath, 0o600);
 
 const launcher = [
   "#!/bin/sh",
   `export TRANSLY_PROJECT_ROOT=${shellQuote(projectRoot)}`,
   `export TRANSLY_EXTENSION_ORIGIN=${shellQuote(extensionOrigin)}`,
   `cd ${shellQuote(projectRoot)} || exit 1`,
-  `exec ${shellQuote(process.execPath)} ${shellQuote(path.join(projectRoot, "native-host", "host.mjs"))} "$@"`,
+  `exec ${shellQuote(process.execPath)} ${shellQuote(path.join(projectRoot, "native-host", "host.mjs"))} "$@" 2>> ${shellQuote(stderrLogPath)}`,
   ""
 ].join("\n");
 await atomicWrite(launcherPath, launcher, 0o700);
@@ -47,6 +52,8 @@ process.stdout.write([
   `Extension ID: ${extensionId}`,
   `Manifest: ${hostManifestPath}`,
   `Launcher: ${launcherPath}`,
+  `Diagnostics: ${path.join(logDir, "native-host.jsonl")}`,
+  `Errors: ${stderrLogPath}`,
   "Reload the unpacked extension in chrome://extensions after manifest changes.",
   ""
 ].join("\n"));
