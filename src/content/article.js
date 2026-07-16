@@ -7,6 +7,8 @@ const ARTICLE_FALLBACK_MAX_TEXT_CHARS = 2500;
 const ARTICLE_AUDIT_MAX_BLOCKS = 60;
 const ARTICLE_AUDIT_MAX_REPAIR_ITEMS = 20;
 const ARTICLE_AUDIT_SAMPLE_CHARS = 520;
+const ARTICLE_NAVIGATION_MAX_ITEMS = 80;
+const ARTICLE_NAVIGATION_CONTROL_SELECTOR = "nav a[href],nav button,[role='navigation'] a[href],[role='navigation'] button";
 const ARTICLE_BLOCK_SELECTOR = [
   "h1", "h2", "h3", "h4", "h5", "h6",
   "p", "li", "blockquote", "figcaption",
@@ -200,8 +202,8 @@ async function translateArticle(targetLanguage, clientRequestId) {
     throw new Error("This page is excluded by the article rule.");
   }
   const container = findArticleContainer(rule);
-  const segments = collectArticleSegments(container, rule);
-  if (!segments.length) {
+  const articleSegments = collectArticleSegments(container, rule);
+  if (!articleSegments.length) {
     const settings = await getSettings();
     const recovered = await runArticleAuditRepair({
       runId,
@@ -228,8 +230,15 @@ async function translateArticle(targetLanguage, clientRequestId) {
     throw new Error(`No article text found. AI audit checked ${recovered.blockCount || 0} candidate blocks and selected no repairable article text.`);
   }
 
+  const navigationSegments = collectNavigationSegments();
+  const contextSegments = sortSegmentsByDocumentOrder([...articleSegments, ...navigationSegments]);
+  const prioritizeItems = globalThis.TranslyArticleBatching?.prioritizeArticleItems;
+  const segments = typeof prioritizeItems === "function"
+    ? prioritizeItems(contextSegments, { scrollY: window.scrollY, viewportHeight: window.innerHeight })
+    : contextSegments;
+
   const settings = await getSettings();
-  const context = buildArticleContext(segments, Number(settings.articleContextChars || ARTICLE_CONTEXT_CHARS));
+  const context = buildArticleContext(contextSegments, Number(settings.articleContextChars || ARTICLE_CONTEXT_CHARS));
   const planner = globalThis.TranslyArticleBatching?.planArticleBatches;
   if (typeof planner !== "function") {
     throw new Error("Article batching runtime is unavailable. Reload the Transly extension.");
@@ -407,6 +416,15 @@ function prioritizeArticleBatches(batchPlans) {
   ));
 }
 
+function sortSegmentsByDocumentOrder(segments) {
+  const orderedElements = sortByDocumentOrder(segments.map((item) => item.element));
+  const orderByElement = new Map(orderedElements.map((element, index) => [element, index]));
+  return [...segments].sort((left, right) => (
+    (orderByElement.get(left.element) ?? Number.POSITIVE_INFINITY)
+    - (orderByElement.get(right.element) ?? Number.POSITIVE_INFINITY)
+  ));
+}
+
 function getBatchViewportDistance(plan, viewportTop, viewportBottom) {
   let distance = Number.POSITIVE_INFINITY;
   for (const item of plan.items || []) {
@@ -496,6 +514,75 @@ function collectArticleSegments(root, rule) {
   return shouldUseGenericBlocks ? buildSegments(collectFallbackBlocks(root, rule), rule) : [];
 }
 
+function collectNavigationSegments() {
+  const controls = uniqueElements(safeQueryAll(document, ARTICLE_NAVIGATION_CONTROL_SELECTOR));
+  const segments = [];
+
+  for (const control of controls) {
+    if (segments.length >= ARTICLE_NAVIGATION_MAX_ITEMS) break;
+    if (!isVisible(control)) continue;
+    const element = findNavigationTextElement(control);
+    if (!element || !isVisible(element)) continue;
+    const rich = extractRichText(element);
+    if (!shouldTranslateNavigationText(rich.translatableText)) continue;
+
+    const id = `navigation-${segments.length + 1}`;
+    element.dataset.translyArticleId = id;
+    segments.push({
+      id,
+      text: rich.text,
+      plainText: rich.plainText,
+      placeholders: rich.placeholders,
+      element,
+      path: describeElement(element),
+      presentation: getNavigationPresentation(control, rich.plainText)
+    });
+  }
+
+  return segments;
+}
+
+function findNavigationTextElement(control) {
+  const visibleTextLeaves = safeQueryAll(control, "span")
+    .filter((element) => isVisible(element))
+    .filter((element) => !safeClosest(element, ".sr-only,.visually-hidden,.screen-reader-text,[aria-hidden='true']"))
+    .filter((element) => shouldTranslateNavigationText(compactText(element.innerText || element.textContent)))
+    .filter((element) => ![...element.children].some((child) => (
+      isVisible(child) && shouldTranslateNavigationText(compactText(child.innerText || child.textContent))
+    )));
+  if (visibleTextLeaves.length === 1) return visibleTextLeaves[0];
+
+  const directTextNodes = [...control.childNodes].filter((node) => (
+    node.nodeType === Node.TEXT_NODE && shouldTranslateNavigationText(compactText(node.textContent))
+  ));
+  if (directTextNodes.length !== 1) return null;
+
+  const host = document.createElement("span");
+  host.className = "transly-navigation-text-host";
+  host.dataset.translyNavigationTextHost = "true";
+  directTextNodes[0].replaceWith(host);
+  host.appendChild(directTextNodes[0]);
+  return host;
+}
+
+function shouldTranslateNavigationText(text) {
+  const normalized = compactText(text);
+  if (normalized.length < 2 || normalized.length > 120) return false;
+  if (/^(OpenAI|ChatGPT)$/i.test(normalized)) return false;
+  if (/^[\d\s.,:;!?()[\]{}'"“”‘’/\-+*=|@#$%^&~`]+$/.test(normalized)) return false;
+  return Boolean(normalized.match(/\p{L}/u));
+}
+
+function getNavigationPresentation(control, text) {
+  const navigation = safeClosest(control, "nav,[role='navigation']");
+  const navigationLabel = navigation?.getAttribute("aria-label") || "";
+  const isTableOfContents = /table of contents|contents|on this page/i.test(navigationLabel)
+    || String(control.getAttribute?.("href") || "").startsWith("#");
+  return isTableOfContents && compactText(text).length > 24
+    ? "navigation-block"
+    : "navigation-inline";
+}
+
 function collectRuleCandidates(rule) {
   return sortByDocumentOrder(uniqueElements((rule.selectors || [])
     .flatMap((selector) => safeQueryAll(document, selector))))
@@ -544,7 +631,8 @@ function collectFallbackBlocks(root, rule) {
 function isTranslatableElement(element, rule) {
   if (!element || isExcludedElement(element, rule)) return false;
   if (!isVisible(element)) return false;
-  if (safeMatches(element, "td,th") && safeClosest(element, "table")?.querySelectorAll("td,th").length > 80) return false;
+  const tableCell = globalThis.TranslyArticlePlacement?.closestTableCell(element) || safeClosest(element, "td,th");
+  if (tableCell && safeClosest(tableCell, "table")?.querySelectorAll("td,th").length > 80) return false;
   if (safeMatches(element, "li") && element.querySelector("p,blockquote,h1,h2,h3,h4,h5,h6")) return false;
   const style = getComputedStyle(element);
   if (style.userSelect === "none" && compactText(element.innerText).length < 80) return false;
@@ -556,7 +644,11 @@ function hasTranslatedAncestor(element) {
 }
 
 function containsLargerCandidate(element) {
-  if (/^H[1-6]$|^P$|^LI$|^BLOCKQUOTE$|^FIGCAPTION$|^TD$|^TH$/.test(element.tagName)) return false;
+  if (globalThis.TranslyArticlePlacement?.isTableCell(element) || safeMatches(element, "td,th")) {
+    return globalThis.TranslyArticlePlacement?.containsNestedTextBlock(element)
+      ?? Boolean(element.querySelector("p,li,blockquote,h1,h2,h3,h4,h5,h6,figcaption"));
+  }
+  if (/^H[1-6]$|^P$|^LI$|^BLOCKQUOTE$|^FIGCAPTION$/.test(element.tagName)) return false;
   return Boolean(element.querySelector("p,li,blockquote,h1,h2,h3,h4,h5,h6"));
 }
 
@@ -595,12 +687,14 @@ function isBlockLike(element) {
 }
 
 function shouldTranslateText(text, element, rule) {
-  if (text.length < (rule.minTextChars || ARTICLE_MIN_TEXT_CHARS)) return false;
+  const inTableCell = Boolean(globalThis.TranslyArticlePlacement?.closestTableCell(element) || safeClosest(element, "td,th"));
+  const minTextChars = inTableCell ? 2 : (rule.minTextChars || ARTICLE_MIN_TEXT_CHARS);
+  if (text.length < minTextChars) return false;
   if (/^[\d\s.,:;!?()[\]{}'"“”‘’/\-+*=|@#$%^&~`]+$/.test(text)) return false;
   if (/^[A-Z0-9_.:/-]{2,80}$/.test(text)) return false;
   if (safeMatches(element, "a") && text.length < 80) return false;
   const words = text.match(/\p{L}+/gu) || [];
-  return words.length >= (rule.minWords || 3) || text.length >= 60;
+  return words.length >= (inTableCell ? 1 : (rule.minWords || 3)) || text.length >= 60;
 }
 
 function buildArticleContext(segments, maxChars) {
@@ -924,8 +1018,11 @@ function prepareRepairSegment(item, index) {
 
 function getTranslationNode(element) {
   const id = element.dataset.translyArticleId;
+  if (!id) return null;
+  const nested = globalThis.TranslyArticlePlacement?.getNestedTranslation(element, id);
+  if (nested) return nested;
   const next = element.nextElementSibling;
-  if (!id || !next?.classList?.contains("transly-translation")) return null;
+  if (!next?.classList?.contains("transly-translation")) return null;
   return next.dataset.translyFor === id ? next : null;
 }
 
@@ -992,6 +1089,9 @@ function createTranslationNode(item, options = {}) {
   node.setAttribute("translate", "no");
   if (options.targetLanguage) node.setAttribute("lang", options.targetLanguage);
   if (options.loading) node.classList.add("transly-loading");
+  if (item.presentation === "navigation-inline" || item.presentation === "navigation-block") {
+    node.classList.add("transly-translation-navigation", `transly-translation-${item.presentation}`);
+  }
   if (!options.loading && options.text) node.translyTranslationText = options.text;
 
   const block = document.createElement("span");
@@ -1045,12 +1145,14 @@ function handleTranslationRevealClick(event) {
 
 function getSourceForTranslation(translation) {
   const source = translation?.previousElementSibling;
-  if (!source || source.dataset.translyArticleId !== translation.dataset.translyFor) return null;
-  return source;
+  if (source?.dataset.translyArticleId === translation.dataset.translyFor) return source;
+  return globalThis.TranslyArticlePlacement?.getTranslationSource(translation) || null;
 }
 
 function updateTranslationRevealState(translation, source) {
-  if (articleDisplayMode !== "translation-only" || translation.classList.contains("transly-loading")) {
+  if (articleDisplayMode !== "translation-only"
+    || translation.classList.contains("transly-loading")
+    || translation.classList.contains("transly-translation-navigation")) {
     translation.classList.remove("transly-can-reveal-source");
     translation.removeAttribute("title");
     return;
@@ -1062,6 +1164,7 @@ function updateTranslationRevealState(translation, source) {
 
 function insertTranslationNode(source, node) {
   attachTranslationPresentation(source, node);
+  if (globalThis.TranslyArticlePlacement?.insertTranslation(source, node)) return;
   source.insertAdjacentElement("afterend", node);
 }
 
@@ -1085,6 +1188,12 @@ function attachTranslationPresentation(source, node) {
   const resolvedFontWeight = globalThis.TranslyArticleStyle?.resolveTranslationFontWeight(style)
     || style.fontWeight;
   if (resolvedFontWeight) node.style.fontWeight = resolvedFontWeight;
+
+  if (node.classList.contains("transly-translation-navigation")) {
+    node.style.marginTop = "0px";
+    node.style.marginBottom = "0px";
+    return;
+  }
 
   const fallbackGap = Math.min(16, Math.max(8, sourceFontSize * 0.34));
   node.style.marginTop = sourceMarginBottom >= sourceFontSize * 0.35 ? "0px" : `${fallbackGap}px`;
@@ -1163,10 +1272,8 @@ function appendTranslatedContent(container, item, text) {
 function removeExistingTranslation(element) {
   const id = element.dataset.translyArticleId;
   if (!id) return;
-  const next = element.nextElementSibling;
-  if (next?.classList?.contains("transly-translation") && next.dataset.translyFor === id) {
-    next.remove();
-  }
+  getTranslationNode(element)?.remove();
+  globalThis.TranslyArticlePlacement?.restoreSourceParts(element);
   restoreTranslationSpacing(element);
 }
 
@@ -1176,9 +1283,13 @@ function clearArticleTranslations(options = {}) {
   document.querySelectorAll(".transly-translation").forEach((node) => node.remove());
   document.querySelectorAll("[data-transly-article-id]").forEach((node) => {
     node.classList.remove("transly-working", "transly-error", "transly-source-revealed");
+    globalThis.TranslyArticlePlacement?.restoreSourceParts(node);
     restoreTranslationSpacing(node);
     delete node.dataset.translyArticleId;
     delete node.dataset.translyTranslated;
+  });
+  document.querySelectorAll("[data-transly-navigation-text-host='true']").forEach((host) => {
+    host.replaceWith(...host.childNodes);
   });
 }
 

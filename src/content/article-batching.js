@@ -20,6 +20,33 @@
     }));
   }
 
+  function prioritizeArticleItems(items, options = {}) {
+    const viewportTop = Number(options.scrollY) || 0;
+    const viewportBottom = viewportTop + (Number(options.viewportHeight) || 0);
+    return [...(Array.isArray(items) ? items : [])]
+      .map((item, documentIndex) => ({
+        item,
+        documentIndex,
+        distance: itemViewportDistance(item, viewportTop, viewportBottom),
+        navigationRank: item?.presentation === "navigation-inline" || item?.presentation === "navigation-block" ? 0 : 1
+      }))
+      .sort((left, right) => (
+        left.distance - right.distance
+        || left.navigationRank - right.navigationRank
+        || left.documentIndex - right.documentIndex
+      ))
+      .map(({ item }) => item);
+  }
+
+  function itemViewportDistance(item, viewportTop, viewportBottom) {
+    const rect = item?.element?.getBoundingClientRect?.();
+    if (!rect) return Number.POSITIVE_INFINITY;
+    const top = rect.top + viewportTop;
+    const bottom = rect.bottom + viewportTop;
+    if (bottom >= viewportTop && top <= viewportBottom) return 0;
+    return top > viewportBottom ? top - viewportBottom : viewportTop - bottom;
+  }
+
   function partitionBalanced(items, count, totalWeight) {
     if (count <= 1) return [items.slice()];
     const groups = [];
@@ -69,5 +96,5 @@
     return Math.min(max, Math.max(min, Math.round(number)));
   }
 
-  global.TranslyArticleBatching = Object.freeze({ planArticleBatches });
+  global.TranslyArticleBatching = Object.freeze({ planArticleBatches, prioritizeArticleItems });
 })(globalThis);
