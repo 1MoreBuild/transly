@@ -14,6 +14,7 @@
   <p>
     <a href="#why-transly">Why Transly</a> ·
     <a href="#what-it-does">Features</a> ·
+    <a href="#transly-vs-immersive-translate">Comparison</a> ·
     <a href="#quick-start">Quick Start</a> ·
     <a href="#how-it-works">How It Works</a> ·
     <a href="#development">Development</a>
@@ -54,6 +55,24 @@ Transly makes a different tradeoff. It assumes translation quality matters more 
 | Observability | Optional Langfuse tracing for the full translation trajectory |
 
 PDF, EPUB, OCR, image translation, and input-box translation are intentionally outside the current scope.
+
+## Transly vs. Immersive Translate
+
+Transly is not trying to replace the full [Immersive Translate](https://immersivetranslate.com/) product. It makes a narrower bet: if you already have a Codex subscription and mainly translate long articles or video subtitles, spend more of the available model context on translation quality instead of building every translation workflow.
+
+| | Transly | Immersive Translate |
+| --- | --- | --- |
+| Primary goal | High-quality, context-rich article and subtitle translation through Codex | A mature, all-in-one translation product across content types and platforms |
+| Long-form quality | Designed for stronger terminology, tone, and paragraph coherence by giving every batch shared article context | Context-aware translation with results and context strategy depending on the selected service and configuration |
+| Cost model | No separate translation API key or per-token API bill when using an existing Codex subscription; Codex usage limits still apply | Free and paid product tiers; model or provider costs depend on the selected service |
+| Feature scope | Articles and video subtitles only | Websites, PDFs, EPUBs, documents, images, subtitles, input boxes, text selection, and more |
+| Platforms | Chrome on macOS | Chrome, Edge, Firefox, Safari, iOS, Android, and more |
+| Maturity | Early-stage open-source project | Established product with broad site compatibility and a large user base |
+
+Choose Transly for a focused, local-first reading tool that can use more context without creating a separate API bill. Choose Immersive Translate when broad format support, cross-platform availability, and mature compatibility matter more than this narrower translation pipeline.
+
+> [!IMPORTANT]
+> Transly's quality advantage is an architectural goal, not yet a published benchmark result. The project is designed to improve long-form coherence through larger shared context and a translation-focused prompt; actual results still depend on the page, language, and model.
 
 ## Quick Start
 
