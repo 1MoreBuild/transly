@@ -11,7 +11,7 @@
   "scripts": {
     "setup": "npm run preflight && npm run native:install && npm run native:doctor",
     "preflight": "node tools/preflight.mjs",
-    "test": "node --test bridge/*.test.mjs native-host/*.test.mjs src/content/*.test.mjs",
+    "test": "node --test bridge/*.test.mjs native-host/*.test.mjs src/*.test.mjs src/content/*.test.mjs",
     "doctor": "node native-host/doctor.mjs",
     "logs": "node tools/logs.mjs",
     "codex:doctor": "node bridge/doctor.mjs",

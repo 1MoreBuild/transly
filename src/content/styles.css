@@ -101,29 +101,6 @@ html[data-transly-article-display-mode="translation-only"]
   }
 }
 
-.transly-toast {
-  position: fixed;
-  top: 18px;
-  right: 18px;
-  z-index: 2147483647;
-  max-width: min(420px, calc(100vw - 36px));
-  padding: 10px 12px;
-  border: 1px solid rgba(40, 55, 70, 0.14);
-  border-radius: 8px;
-  background: rgba(25, 34, 44, 0.94);
-  color: #fff;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
-  font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-.transly-toast[data-tone="error"] {
-  background: rgba(128, 29, 29, 0.96);
-}
-
-.transly-toast[hidden] {
-  display: none;
-}
-
 #transly-caption-window {
   position: fixed;
   left: 50%;

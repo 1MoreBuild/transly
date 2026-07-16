@@ -11,6 +11,10 @@ test("article scripts run in frames without duplicating subtitle runtime", () =>
   assert.ok(articleEntry);
   assert.equal(articleEntry.all_frames, true);
   assert.equal(articleEntry.match_about_blank, true);
+  assert.equal(articleEntry.js.includes("src/content/article-audit.js"), true);
+  assert.equal(articleEntry.js.includes("src/content/article-style.js"), true);
+  assert.equal(articleEntry.js.includes("src/content/article-text.js"), true);
+  assert.equal(articleEntry.js.includes("src/content/article-progress.js"), true);
   assert.equal(articleEntry.js.includes("src/content/article-batching.js"), true);
   assert.equal(articleEntry.js.includes("src/content/subtitle-content.js"), false);
 

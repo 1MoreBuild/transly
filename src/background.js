@@ -19,7 +19,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "TRANSLY_TRANSLATE") {
-    postNativeRequest("translate", message.payload)
+    postNativeRequest("translate", message.payload, {
+      onProgress(data) {
+        relayTranslationProgress(sender, data);
+      }
+    })
       .then((data) => sendResponse({ ok: true, data }))
       .catch((error) => sendResponse({ ok: false, error: formatNativeError(error) }));
     return true;
@@ -58,7 +62,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-function postNativeRequest(type, payload = {}) {
+function postNativeRequest(type, payload = {}, options = {}) {
   validateNativePayload(type, payload);
   const port = getNativePort();
   const id = crypto.randomUUID();
@@ -72,7 +76,7 @@ function postNativeRequest(type, payload = {}) {
           scheduleNativePortClose();
         }, 15_000)
       : null;
-    pendingRequests.set(id, { resolve, reject, timeout });
+    pendingRequests.set(id, { resolve, reject, timeout, onProgress: options.onProgress });
     try {
       port.postMessage({
         protocolVersion: NATIVE_PROTOCOL_VERSION,
@@ -154,7 +158,14 @@ function getNativePort() {
     if (message?.protocolVersion !== NATIVE_PROTOCOL_VERSION || typeof message.id !== "string") return;
     const pending = pendingRequests.get(message.id);
     if (!pending) return;
-    if (message.progress) return;
+    if (message.progress) {
+      try {
+        pending.onProgress?.(message.data);
+      } catch {
+        // Progress is best effort; the validated final response remains authoritative.
+      }
+      return;
+    }
     pendingRequests.delete(message.id);
     clearTimeout(pending.timeout);
 
@@ -184,6 +195,18 @@ function getNativePort() {
   });
 
   return port;
+}
+
+function relayTranslationProgress(sender, data) {
+  const tabId = sender.tab?.id;
+  if (!Number.isInteger(tabId) || !data || typeof data !== "object") return;
+  const message = { type: "TRANSLY_TRANSLATION_PROGRESS", data };
+  const callback = () => void chrome.runtime.lastError;
+  if (Number.isInteger(sender.frameId)) {
+    chrome.tabs.sendMessage(tabId, message, { frameId: sender.frameId }, callback);
+  } else {
+    chrome.tabs.sendMessage(tabId, message, callback);
+  }
 }
 
 function scheduleNativePortClose() {

@@ -6,6 +6,7 @@ import {
 import { loadLocalEnv } from "./env.mjs";
 import { logDiagnostic, summarizeDiagnosticPayload } from "./diagnostics.mjs";
 import { parseJsonOutput } from "./json-output.mjs";
+import { createResponseCache, hashCacheIdentity } from "./response-cache.mjs";
 import { createStreamingStringArrayParser } from "./stream-items.mjs";
 import { assertPlaceholderIntegrity, summarizePlaceholderIntegrity } from "./translation-quality.mjs";
 import { buildTranslationRequest, normalizeTranslationResult } from "./translation-prompt.mjs";
@@ -24,8 +25,10 @@ const langfuseStatus = await initLangfuse();
 
 const CODEX_MODEL = process.env.TRANSLY_CODEX_MODEL || DEFAULT_CODEX_CHATGPT_MODEL;
 const CODEX_REASONING_EFFORT = process.env.TRANSLY_REASONING_EFFORT || "medium";
-const cache = new Map();
-const inFlightTranslations = new Map();
+const CACHE_IDENTITY_VERSION = 1;
+const hotResponses = new Map();
+const inFlightResponses = new Map();
+const persistentResponses = createResponseCache();
 
 export async function handleServiceRequest(type, payload = {}, context = {}) {
   if (type === "health") {
@@ -59,42 +62,16 @@ export async function handleServiceRequest(type, payload = {}, context = {}) {
       return { valid: true };
     });
 
-    const cached = payload.cacheKey ? cache.get(payload.cacheKey) : null;
-    const inFlight = payload.cacheKey ? inFlightTranslations.get(payload.cacheKey) : null;
-    await traceSpan(trace, "cache-lookup", {
-      input: { cacheKey: payload.cacheKey || null },
-      metadata: { cacheEnabled: Boolean(payload.cacheKey) }
-    }, async () => ({ hit: Boolean(cached), inFlight: Boolean(inFlight) }));
-
-    await logDiagnostic("cache-lookup", {
-      ...summarizeDiagnosticPayload(payload),
-      hit: Boolean(cached),
-      inFlight: Boolean(inFlight)
+    const request = await buildTranslationModelRequest(payload, trace);
+    const cacheIdentity = payload.cacheKey
+      ? buildTranslationCacheIdentity(payload, request)
+      : null;
+    return resolveCachedResponse({
+      cacheIdentity,
+      payload,
+      trace,
+      produce: () => translateWithChatGptCodex(payload, trace, context, 1, request)
     });
-
-    if (cached) return cached;
-    if (inFlight) {
-      return traceSpan(trace, "inflight-join", {
-        metadata: { cacheEnabled: true }
-      }, async () => inFlight);
-    }
-
-    const translation = translateWithChatGptCodex(payload, trace, context);
-    if (payload.cacheKey) inFlightTranslations.set(payload.cacheKey, translation);
-    try {
-      const translated = await translation;
-      if (payload.cacheKey) {
-        cache.set(payload.cacheKey, translated);
-        await traceSpan(trace, "cache-store", {
-          input: { cacheKey: payload.cacheKey, itemCount: translated.items.length }
-        }, async () => ({ stored: true }));
-      }
-      return translated;
-    } finally {
-      if (payload.cacheKey && inFlightTranslations.get(payload.cacheKey) === translation) {
-        inFlightTranslations.delete(payload.cacheKey);
-      }
-    }
   });
 }
 
@@ -140,15 +117,28 @@ async function handleAuditRequest(payload, context) {
       return { actions: [], notes: ["No blocks to audit."] };
     }
 
-    return auditArticleWithChatGptCodex(payload, trace, context);
+    const prompt = await buildAuditModelPrompt(payload, trace);
+    const cacheIdentity = payload.auditKey
+      ? buildAuditCacheIdentity(payload, prompt)
+      : null;
+    return resolveCachedResponse({
+      cacheIdentity,
+      payload,
+      trace,
+      produce: () => auditArticleWithChatGptCodex(payload, trace, context, prompt)
+    });
   });
 }
 
-async function translateWithChatGptCodex(payload, trace, context, attempt = 1) {
-  const request = await traceSpan(trace, "build-prompt", {
+async function buildTranslationModelRequest(payload, trace) {
+  return traceSpan(trace, "build-prompt", {
     input: summarizePayload(payload),
     metadata: { mode: payload.mode, itemCount: payload.items.length }
   }, async () => buildTranslationRequest(payload));
+}
+
+async function translateWithChatGptCodex(payload, trace, context, attempt = 1, preparedRequest = null) {
+  const request = preparedRequest || await buildTranslationModelRequest(payload, trace);
   const { instructions, prompt } = request;
   const modelInput = `${instructions}\n\n${prompt}`;
 
@@ -293,11 +283,15 @@ async function translateWithChatGptCodex(payload, trace, context, attempt = 1) {
   return result;
 }
 
-async function auditArticleWithChatGptCodex(payload, trace, _context) {
-  const prompt = await traceSpan(trace, "build-audit-prompt", {
+async function buildAuditModelPrompt(payload, trace) {
+  return traceSpan(trace, "build-audit-prompt", {
     input: summarizeAuditPayload(payload),
     metadata: { blockCount: payload.blocks.length }
   }, async () => buildAuditPrompt(payload));
+}
+
+async function auditArticleWithChatGptCodex(payload, trace, _context, preparedPrompt = null) {
+  const prompt = preparedPrompt || await buildAuditModelPrompt(payload, trace);
 
   const generation = startGeneration(trace, {
     model: CODEX_MODEL,
@@ -380,6 +374,131 @@ async function auditArticleWithChatGptCodex(payload, trace, _context) {
   }));
 
   return result;
+}
+
+async function resolveCachedResponse({ cacheIdentity, payload, trace, produce }) {
+  if (!cacheIdentity) {
+    await recordCacheLookup(payload, trace, { enabled: false, hit: false, inFlight: false, source: null });
+    return produce();
+  }
+
+  if (hotResponses.has(cacheIdentity)) {
+    const value = hotResponses.get(cacheIdentity);
+    await recordCacheLookup(payload, trace, { enabled: true, hit: true, inFlight: false, source: "memory" });
+    return value;
+  }
+
+  const inFlight = inFlightResponses.get(cacheIdentity);
+  if (inFlight) {
+    await recordCacheLookup(payload, trace, { enabled: true, hit: false, inFlight: true, source: "in-flight" });
+    return traceSpan(trace, "inflight-join", {
+      metadata: { cacheEnabled: true }
+    }, async () => inFlight);
+  }
+
+  const operation = (async () => {
+    let disk = { hit: false, value: null };
+    try {
+      disk = await persistentResponses.get(cacheIdentity);
+    } catch (error) {
+      await logDiagnostic("cache-error", {
+        ...summarizeDiagnosticPayload(payload),
+        operation: "read",
+        error: String(error?.message || error)
+      });
+    }
+
+    if (disk.hit) {
+      hotResponses.set(cacheIdentity, disk.value);
+      await recordCacheLookup(payload, trace, { enabled: true, hit: true, inFlight: false, source: "disk" });
+      return disk.value;
+    }
+
+    await recordCacheLookup(payload, trace, { enabled: true, hit: false, inFlight: false, source: null });
+    const value = await produce();
+    hotResponses.set(cacheIdentity, value);
+
+    let persisted = false;
+    try {
+      persisted = await persistentResponses.set(cacheIdentity, value);
+    } catch (error) {
+      await logDiagnostic("cache-error", {
+        ...summarizeDiagnosticPayload(payload),
+        operation: "write",
+        error: String(error?.message || error)
+      });
+    }
+    const summary = summarizeCachedValue(value);
+    await traceSpan(trace, "cache-store", {
+      input: { cacheKey: cacheIdentity, ...summary },
+      metadata: { persistent: persisted }
+    }, async () => ({ stored: true, persistent: persisted }));
+    await logDiagnostic("cache-store", {
+      ...summarizeDiagnosticPayload(payload),
+      persistent: persisted,
+      ...summary
+    });
+    return value;
+  })();
+
+  inFlightResponses.set(cacheIdentity, operation);
+  try {
+    return await operation;
+  } finally {
+    if (inFlightResponses.get(cacheIdentity) === operation) {
+      inFlightResponses.delete(cacheIdentity);
+    }
+  }
+}
+
+async function recordCacheLookup(payload, trace, details) {
+  await traceSpan(trace, "cache-lookup", {
+    metadata: {
+      cacheEnabled: details.enabled,
+      source: details.source || "none"
+    }
+  }, async () => ({
+    hit: details.hit,
+    inFlight: details.inFlight,
+    source: details.source
+  }));
+  await logDiagnostic("cache-lookup", {
+    ...summarizeDiagnosticPayload(payload),
+    hit: details.hit,
+    inFlight: details.inFlight,
+    source: details.source
+  });
+}
+
+function buildTranslationCacheIdentity(payload, request) {
+  return hashCacheIdentity({
+    version: CACHE_IDENTITY_VERSION,
+    kind: "translation",
+    model: CODEX_MODEL,
+    reasoningEffort: CODEX_REASONING_EFFORT,
+    clientCacheKey: payload.cacheKey,
+    itemIds: payload.items.map((item) => item.id),
+    instructions: request.instructions,
+    prompt: request.prompt
+  });
+}
+
+function buildAuditCacheIdentity(payload, prompt) {
+  return hashCacheIdentity({
+    version: CACHE_IDENTITY_VERSION,
+    kind: "article-audit",
+    model: CODEX_MODEL,
+    reasoningEffort: CODEX_REASONING_EFFORT,
+    clientCacheKey: payload.auditKey,
+    prompt
+  });
+}
+
+function summarizeCachedValue(value) {
+  return {
+    itemCount: Array.isArray(value?.items) ? value.items.length : 0,
+    actionCount: Array.isArray(value?.actions) ? value.actions.length : 0
+  };
 }
 
 function normalizeAuditResult(parsed, payload) {

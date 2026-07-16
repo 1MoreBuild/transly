@@ -52,6 +52,8 @@ Open the extension popup on a page and choose:
 
 The Native Host starts automatically for translation requests. No local HTTP server or terminal process needs to remain running.
 
+Successful translation and AI audit responses are cached locally under `~/Library/Caches/Transly/responses/`. The cache survives Native Host restarts, expires after 30 days, and keeps at most 1,000 responses. Cache filenames are hashed and files are readable only by the current user. Remove that directory to clear the cache.
+
 ## Langfuse
 
 Langfuse is optional and does not participate in translation. Without configuration, or when its optional packages cannot load, tracing is disabled and article/subtitle translation continues normally.
@@ -93,7 +95,7 @@ npm run codex:doctor
 
 ## Architecture
 
-Content scripts send validated requests to the MV3 background service worker. The service worker opens a task-scoped `chrome.runtime.connectNative()` port. The Native Host owns request scheduling, in-memory caching, Codex OAuth, model calls, and Langfuse tracing.
+Content scripts send validated requests to the MV3 background service worker. The service worker opens a task-scoped `chrome.runtime.connectNative()` port. The Native Host owns request scheduling, memory and persistent response caching, Codex OAuth, model calls, and Langfuse tracing.
 
 See [docs/architecture.md](docs/architecture.md) for the protocol and lifecycle.
 

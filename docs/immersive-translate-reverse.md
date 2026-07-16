@@ -311,6 +311,7 @@ The extraction path builds paragraph objects with:
 Important behavior:
 
 - Elements matching stay-original rules are replaced with placeholders before translation.
+- The extractor (`Cd`) keeps a separate `pureText` value containing only text that may be translated. Before a paragraph is accepted, `Os` removes placeholder variables; a paragraph with no remaining text is rejected. A later service-layer check (`tI`) also marks regex-masked input as `onlyPlaceholder` and returns the original without a model request.
 - After translation, placeholders are replaced with sanitized original element HTML.
 - DOMPurify is used with configured `domPurifyAddTags`.
 - `enableRenderHtmlTag` is false by default, so arbitrary returned HTML is not trusted.

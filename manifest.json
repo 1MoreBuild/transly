@@ -28,7 +28,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["src/content/article-batching.js", "src/content/article.js"],
+      "js": ["src/content/article-audit.js", "src/content/article-style.js", "src/content/article-text.js", "src/content/article-progress.js", "src/content/article-batching.js", "src/content/article.js"],
       "css": ["src/content/styles.css"],
       "all_frames": true,
       "match_about_blank": true,

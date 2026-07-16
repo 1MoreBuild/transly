@@ -44,7 +44,7 @@ const ARTICLE_EXCLUDE_SELECTORS = [
   ".sr-only", ".visually-hidden", ".screen-reader-text", ".u-hiddenVisually",
   "[class*='sr-only' i]", "[class*='visually-hidden' i]", "[class*='screen-reader' i]",
   ".material-icons", "[class*='material-symbols']",
-  ".transly-translation", ".transly-toast"
+  ".transly-translation"
 ];
 const ARTICLE_AUDIT_EXCLUDE_SELECTORS = [
   "script", "style", "noscript", "template",
@@ -57,13 +57,15 @@ const ARTICLE_AUDIT_EXCLUDE_SELECTORS = [
   ".sr-only", ".visually-hidden", ".screen-reader-text", ".u-hiddenVisually",
   "[class*='sr-only' i]", "[class*='visually-hidden' i]", "[class*='screen-reader' i]",
   ".material-icons", "[class*='material-symbols']",
-  ".transly-translation", ".transly-toast"
+  ".transly-translation"
 ];
 const ARTICLE_PROTECTED_INLINE_SELECTOR = [
   "a[href]",
   "br",
   "code", "kbd", "samp", "var",
   "math", "svg", "canvas", "img",
+  "math-field", "mjx-container", ".katex", ".MathJax", ".MathJax_Display",
+  "[data-math]", "[data-latex]", "[class~='math']", "[class~='latex']",
   "sub", "sup",
   "[data-transly-stay-original]",
   "[translate=no]", ".notranslate"
@@ -116,6 +118,7 @@ const ARTICLE_CONTAINER_HINTS = [
 
 let articleRunId = 0;
 let activeArticleClientRunId = "";
+const activeArticleProgressBatches = new Map();
 let articleDisplayMode = "bilingual";
 let articleRuntimeState = {
   status: "idle",
@@ -128,6 +131,11 @@ initializeArticleDisplayMode();
 document.addEventListener("click", handleTranslationRevealClick);
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "TRANSLY_TRANSLATION_PROGRESS") {
+    renderArticleTranslationProgress(message.data);
+    return false;
+  }
+
   if (message?.type === "TRANSLY_TRANSLATE_ARTICLE") {
     const clientRequestId = crypto.randomUUID();
     activeArticleClientRunId = clientRequestId;
@@ -142,7 +150,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((error) => {
         console.error("[transly] article translation failed", error);
         if (activeArticleClientRunId === clientRequestId) {
-          showToast(String(error?.message || error), { tone: "error", timeout: 6000 });
           setArticleRuntimeState("error", {
             clientRequestId,
             error: String(error?.message || error)
@@ -186,7 +193,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 async function translateArticle(targetLanguage, clientRequestId) {
   const runId = ++articleRunId;
-  clearArticleTranslations({ cancelActiveRun: false, quiet: true });
+  clearArticleTranslations({ cancelActiveRun: false });
 
   const rule = getArticleRule();
   if (rule.disabled) {
@@ -211,9 +218,6 @@ async function translateArticle(targetLanguage, clientRequestId) {
       return { cancelled: true };
     }
     if (recovered.repairedCount) {
-      showToast(`Article translation recovered by AI audit: ${recovered.repairedCount} blocks.`, {
-        timeout: 3500
-      });
       return {
         translatedCount: recovered.repairedCount,
         segmentCount: recovered.repairedCount,
@@ -263,7 +267,6 @@ async function translateArticle(targetLanguage, clientRequestId) {
       return { cancelled: true };
     }
     console.warn("[transly] article audit failed", error);
-    showToast(`AI audit failed: ${String(error?.message || error)}`, { tone: "error", timeout: 4000 });
     audit = {
       enabled: true,
       failed: true,
@@ -277,9 +280,6 @@ async function translateArticle(targetLanguage, clientRequestId) {
   }
   translatedCount += audit.repairedCount;
 
-  showToast(`Article translation complete: ${translatedCount}/${segments.length + audit.repairedCount} blocks.`, {
-    timeout: 3500
-  });
   return { translatedCount, segmentCount: segments.length, batchCount: batchPlans.length, audit };
 }
 
@@ -292,8 +292,6 @@ async function translateArticleBatches({
   batchPlans
 }) {
   const plans = prioritizeArticleBatches(batchPlans);
-
-  showToast(`Translating ${segments.length} article blocks in ${plans.length} batch${plans.length === 1 ? "" : "es"}...`);
 
   const isActive = () => runId === articleRunId && clientRequestId === activeArticleClientRunId;
   const results = await Promise.allSettled(plans.map(async (plan) => {
@@ -327,8 +325,6 @@ async function translateArticleBatch({
 }) {
   const batch = plan.items;
   markBatch(batch, "working");
-  showToast(`Article batch ${plan.batchIndex}/${plan.batchCount}...`);
-
   try {
     const cacheKey = await sha256([
       "article",
@@ -336,9 +332,18 @@ async function translateArticleBatch({
       targetLanguage,
       batch.map((item) => `${item.id}:${item.text}`).join("\n")
     ].join("\n"));
+    const phase = "translate";
+    registerArticleProgressBatch({
+      runId,
+      clientRequestId,
+      phase,
+      batchIndex: plan.batchIndex,
+      targetLanguage,
+      items: batch
+    });
     const response = await requestTranslation({
       mode: "article",
-      phase: "translate",
+      phase,
       clientRequestId,
       batchIndex: plan.batchIndex,
       batchCount: plan.batchCount,
@@ -359,7 +364,38 @@ async function translateArticleBatch({
       markFailedBatch(batch);
     }
     throw error;
+  } finally {
+    unregisterArticleProgressBatch(clientRequestId, "translate", plan.batchIndex);
   }
+}
+
+function registerArticleProgressBatch(details) {
+  const key = articleProgressBatchKey(details.clientRequestId, details.phase, details.batchIndex);
+  activeArticleProgressBatches.set(key, {
+    ...details,
+    itemById: new Map(details.items.map((item) => [item.id, item]))
+  });
+}
+
+function unregisterArticleProgressBatch(clientRequestId, phase, batchIndex) {
+  activeArticleProgressBatches.delete(articleProgressBatchKey(clientRequestId, phase, batchIndex));
+}
+
+function articleProgressBatchKey(clientRequestId, phase, batchIndex) {
+  return `${clientRequestId || ""}:${phase || ""}:${batchIndex || ""}`;
+}
+
+function renderArticleTranslationProgress(data) {
+  if (data?.mode !== "article" || data.clientRequestId !== activeArticleClientRunId) return;
+  const key = articleProgressBatchKey(data.clientRequestId, data.phase, data.batchIndex);
+  const active = activeArticleProgressBatches.get(key);
+  if (!active || active.runId !== articleRunId) return;
+  const selectRenderable = globalThis.TranslyArticleProgress?.selectRenderableProgressItems;
+  if (typeof selectRenderable !== "function") return;
+  const translations = selectRenderable(active.items, data.items);
+  if (!translations.length) return;
+  const sourceItems = translations.map((item) => active.itemById.get(item.id)).filter(Boolean);
+  renderArticleTranslations(sourceItems, translations, active.targetLanguage);
 }
 
 function prioritizeArticleBatches(batchPlans) {
@@ -475,7 +511,7 @@ function buildSegments(candidates, rule) {
   for (const element of candidates) {
     const rich = extractRichText(element);
     const key = normalizeDuplicateKey(rich.plainText);
-    if (!shouldTranslateText(rich.plainText, element, rule) || seen.has(key)) continue;
+    if (!shouldTranslateText(rich.translatableText, element, rule) || seen.has(key)) continue;
     seen.add(key);
     const id = `article-${segments.length + 1}`;
     element.dataset.translyArticleId = id;
@@ -623,7 +659,6 @@ async function runArticleAuditRepair({ runId, phase, targetLanguage, clientReque
   });
   if (!audit.blocks.length) return { enabled: true, repairedCount: 0, actionCount: 0, blockCount: 0 };
 
-  showToast(phase === "initial" ? "AI is checking article blocks..." : "AI is checking translation coverage...");
   const response = await requestArticleAudit({
     mode: "article-audit",
     phase,
@@ -669,9 +704,18 @@ async function runArticleAuditRepair({ runId, phase, targetLanguage, clientReque
       repairItems.map((item) => `${item.id}:${item.text}`).join("\n")
     ].join("\n"));
     const repairContext = context || buildFallbackArticleContext(root);
+    const phase = "audit-repair";
+    registerArticleProgressBatch({
+      runId,
+      clientRequestId,
+      phase,
+      batchIndex: 1,
+      targetLanguage,
+      items: repairItems
+    });
     const translated = await requestTranslation({
       mode: "article",
-      phase: "audit-repair",
+      phase,
       clientRequestId,
       batchIndex: 1,
       batchCount: 1,
@@ -699,6 +743,8 @@ async function runArticleAuditRepair({ runId, phase, targetLanguage, clientReque
   } catch (error) {
     markBatch(repairItems, "idle");
     throw error;
+  } finally {
+    unregisterArticleProgressBatch(clientRequestId, "audit-repair", 1);
   }
 }
 
@@ -713,7 +759,7 @@ function buildArticleAuditSnapshot(root, rule, translatedSegments, options = {})
   for (const element of candidates) {
     const rich = extractRichText(element);
     const key = normalizeDuplicateKey(rich.plainText);
-    if (!shouldAuditText(rich.plainText, element, rule) || seen.has(key)) continue;
+    if (!shouldAuditText(rich.translatableText, element, rule) || seen.has(key)) continue;
     seen.add(key);
 
     const translationNode = getTranslationNode(element);
@@ -789,6 +835,10 @@ function buildArticleAuditSnapshot(root, rule, translatedSegments, options = {})
 }
 
 function collectAuditCandidates(root, rule) {
+  const isContaminated = globalThis.TranslyArticleAudit?.isAuditCandidateContaminated;
+  if (typeof isContaminated !== "function") {
+    throw new Error("Article audit runtime is unavailable. Reload the Transly extension.");
+  }
   const auditRule = {
     ...ARTICLE_GENERIC_RULE,
     relaxedAudit: true,
@@ -811,6 +861,7 @@ function collectAuditCandidates(root, rule) {
   const textLeaves = collectAuditTextLeaves(root, auditRule);
   return sortByDocumentOrder(uniqueElements([...primary, ...fallback, ...textLeaves]))
     .filter((element) => !safeClosest(element, ".transly-translation"))
+    .filter((element) => !isContaminated(element))
     .slice(0, ARTICLE_AUDIT_MAX_CANDIDATES);
 }
 
@@ -908,8 +959,7 @@ function markFailedBatch(batch) {
   for (const item of batch) {
     item.element.classList.remove("transly-working");
     item.element.classList.add("transly-error");
-    const translation = getTranslationNode(item.element);
-    if (translation?.classList.contains("transly-loading")) removeExistingTranslation(item.element);
+    if (getTranslationNode(item.element)) removeExistingTranslation(item.element);
   }
 }
 
@@ -1024,7 +1074,6 @@ function attachTranslationPresentation(source, node) {
   const copiedProperties = [
     "color",
     "fontSize",
-    "fontWeight",
     "fontStyle",
     "lineHeight",
     "letterSpacing",
@@ -1033,6 +1082,9 @@ function attachTranslationPresentation(source, node) {
   for (const property of copiedProperties) {
     if (style[property]) node.style[property] = style[property];
   }
+  const resolvedFontWeight = globalThis.TranslyArticleStyle?.resolveTranslationFontWeight(style)
+    || style.fontWeight;
+  if (resolvedFontWeight) node.style.fontWeight = resolvedFontWeight;
 
   const fallbackGap = Math.min(16, Math.max(8, sourceFontSize * 0.34));
   node.style.marginTop = sourceMarginBottom >= sourceFontSize * 0.35 ? "0px" : `${fallbackGap}px`;
@@ -1120,6 +1172,7 @@ function removeExistingTranslation(element) {
 
 function clearArticleTranslations(options = {}) {
   if (options.cancelActiveRun !== false) articleRunId++;
+  activeArticleProgressBatches.clear();
   document.querySelectorAll(".transly-translation").forEach((node) => node.remove());
   document.querySelectorAll("[data-transly-article-id]").forEach((node) => {
     node.classList.remove("transly-working", "transly-error", "transly-source-revealed");
@@ -1127,7 +1180,6 @@ function clearArticleTranslations(options = {}) {
     delete node.dataset.translyArticleId;
     delete node.dataset.translyTranslated;
   });
-  if (!options.quiet) showToast("Article translations cleared.", { timeout: 1800 });
 }
 
 function extractRichText(element) {
@@ -1135,7 +1187,7 @@ function extractRichText(element) {
     .filter((node) => !safeClosest(node.parentElement, ARTICLE_PROTECTED_INLINE_SELECTOR));
   if (!protectedElements.length) {
     const text = compactText(element.innerText || element.textContent);
-    return { text, plainText: text, placeholders: [] };
+    return { text, plainText: text, translatableText: text, placeholders: [] };
   }
 
   const clone = element.cloneNode(true);
@@ -1173,9 +1225,14 @@ function extractRichText(element) {
 
   const text = compactText(clone.textContent);
   const plainText = compactText(element.innerText || element.textContent);
+  const extractTranslatableText = globalThis.TranslyArticleText?.extractTranslatableText;
+  if (typeof extractTranslatableText !== "function") {
+    throw new Error("Article text runtime is unavailable. Reload the Transly extension.");
+  }
   return {
     text,
     plainText,
+    translatableText: extractTranslatableText(text),
     placeholders
   };
 }
@@ -1225,23 +1282,6 @@ function getSettings() {
       resolve(response?.data || {});
     });
   });
-}
-
-function showToast(text, options = {}) {
-  let toast = document.querySelector("#transly-toast");
-  if (!toast) {
-    toast = document.createElement("div");
-    toast.id = "transly-toast";
-    toast.className = "transly-toast";
-    document.documentElement.appendChild(toast);
-  }
-  toast.textContent = text;
-  toast.dataset.tone = options.tone || "info";
-  toast.hidden = false;
-  clearTimeout(showToast.timer);
-  showToast.timer = setTimeout(() => {
-    toast.hidden = true;
-  }, options.timeout || 2600);
 }
 
 async function sha256(input) {
