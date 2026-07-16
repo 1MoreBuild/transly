@@ -81,6 +81,10 @@ for (const item of checks) {
   process.stdout.write(`${item.ok ? "OK" : "FAIL"}  ${item.name}: ${item.detail}\n`);
 }
 process.stdout.write(`Extension ID: ${extensionId}\n`);
+process.stdout.write(`Unpacked extension: ${projectRoot}\n`);
+process.stdout.write(
+  `Next step: Open chrome://extensions, enable Developer mode, choose Load unpacked, and select ${projectRoot}\n`
+);
 if (checks.some((item) => !item.ok)) process.exitCode = 1;
 
 function pass(name, detail) { checks.push({ ok: true, name, detail }); }

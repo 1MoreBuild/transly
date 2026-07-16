@@ -31,9 +31,10 @@ When the user asks to install or set up Transly:
 5. Run `npm test` after setup. Do not run `native:smoke` or any other real model
    request without explicit user approval because it consumes subscription
    capacity.
-6. If browser control is available, load the repository root as an unpacked
-   Chrome extension. Otherwise return its exact absolute path and the remaining
-   `chrome://extensions` action.
+6. Do not install the extension through browser automation. Return the
+   repository root's exact absolute path and ask the user to open
+   `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and
+   select that folder.
 7. Report completed checks, manual steps, and whether any model request ran.
 
 ## Sources Of Truth
