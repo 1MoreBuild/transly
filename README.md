@@ -2,7 +2,7 @@
   <img src="assets/transly-logo.png" width="128" alt="Transly logo">
   <h1>Transly</h1>
   <p><strong>Read the web in your language, powered by your Codex subscription.</strong></p>
-  <p>Context-aware article and video subtitle translation for Chrome.</p>
+  <p>Context-aware article translation for Chrome. Video subtitles are in beta.</p>
 
   <p>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111" alt="MIT License"></a>
@@ -21,12 +21,12 @@
   </p>
 </div>
 
-Transly is a local-first Chrome extension for reading articles and watching subtitled videos across languages. It uses your existing ChatGPT Codex login, so there is no API key to configure and no translation server to keep running.
+Transly is a local-first Chrome extension for reading long-form articles across languages. It uses your existing ChatGPT Codex login, so there is no API key to configure and no translation server to keep running. Experimental video subtitle translation is also available as a beta feature.
 
 Instead of translating isolated fragments, Transly gives the model coherent article context, translates in practical batches, and displays each completed paragraph as soon as it is ready. The result is designed to read like natural writing, not a sequence of literal sentence conversions.
 
 > [!NOTE]
-> Transly is an early, macOS-only open-source project. It currently supports article translation and video subtitles. It is not affiliated with OpenAI or Immersive Translate.
+> Transly is an early, macOS-only open-source project. Article translation is the primary, most polished experience. Video subtitle translation is still in beta. Transly is not affiliated with OpenAI or Immersive Translate.
 
 ## Why Transly
 
@@ -49,7 +49,7 @@ Transly makes a different tradeoff. It assumes translation quality matters more 
 | Reading modes | Bilingual view or translation-only view with click-to-reveal originals |
 | Progressive results | Renders complete translated paragraphs as the model returns them |
 | Rich content | Preserves links, line breaks, code, formulas, and protected page elements |
-| Video subtitles | YouTube timed text, WebVTT, and Bilibili subtitle JSON |
+| Video subtitles **Beta** | Experimental support for YouTube timed text, WebVTT, and Bilibili subtitle JSON |
 | Local model access | Uses the local Codex ChatGPT authentication flow; no API key in the extension |
 | Quality audit | Checks the translated page for missing or broken article blocks |
 | Observability | Optional Langfuse tracing for the full translation trajectory |
@@ -58,14 +58,14 @@ PDF, EPUB, OCR, image translation, and input-box translation are intentionally o
 
 ## Transly vs. Immersive Translate
 
-Transly is not trying to replace the full [Immersive Translate](https://immersivetranslate.com/) product. It makes a narrower bet: if you already have a Codex subscription and mainly translate long articles or video subtitles, spend more of the available model context on translation quality instead of building every translation workflow.
+Transly is not trying to replace the full [Immersive Translate](https://immersivetranslate.com/) product. It makes a narrower bet: if you already have a Codex subscription and mainly translate long articles, spend more of the available model context on translation quality instead of building every translation workflow.
 
 | | Transly | Immersive Translate |
 | --- | --- | --- |
-| Primary goal | High-quality, context-rich article and subtitle translation through Codex | A mature, all-in-one translation product across content types and platforms |
+| Primary goal | High-quality, context-rich article translation through Codex | A mature, all-in-one translation product across content types and platforms |
 | Long-form quality | Designed for stronger terminology, tone, and paragraph coherence by giving every batch shared article context | Context-aware translation with results and context strategy depending on the selected service and configuration |
 | Cost model | No separate translation API key or per-token API bill when using an existing Codex subscription; Codex usage limits still apply | Free and paid product tiers; model or provider costs depend on the selected service |
-| Feature scope | Articles and video subtitles only | Websites, PDFs, EPUBs, documents, images, subtitles, input boxes, text selection, and more |
+| Feature scope | Articles, plus experimental video subtitles in beta | Websites, PDFs, EPUBs, documents, images, subtitles, input boxes, text selection, and more |
 | Platforms | Chrome on macOS | Chrome, Edge, Firefox, Safari, iOS, Android, and more |
 | Maturity | Early-stage open-source project | Established product with broad site compatibility and a large user base |
 
@@ -122,13 +122,14 @@ Transly supports two article layouts:
 
 Article batches are prioritized around the current viewport. A subtle inline loading state marks pending passages, and each paragraph replaces its loading state only after a complete translation has passed structural validation.
 
-For supported videos, enable **Video subtitles** in the popup to display the translated subtitle overlay alongside the source subtitle.
+> [!WARNING]
+> **Video subtitles are a beta feature.** You can enable them from the popup on supported videos, but site compatibility, timing, and presentation are not yet as polished as article translation.
 
 ## How It Works
 
 ```mermaid
 flowchart LR
-  Page["Article or video"] --> Extension["Chrome extension"]
+  Page["Article or beta video subtitles"] --> Extension["Chrome extension"]
   Extension --> Host["Local Native Host"]
   Host --> Codex["ChatGPT Codex"]
   Codex --> Host
@@ -221,9 +222,9 @@ Many of Transly's product and engineering decisions were informed by studying it
 - identifying translatable article blocks while excluding navigation and hidden interface content;
 - protecting links, code, formulas, and other inline elements with placeholders;
 - preserving source styles and supporting bilingual and translation-only reading modes;
-- handling website compatibility and video subtitle translation as first-class problems.
+- treating website compatibility and video subtitle translation as first-class product problems.
 
-Transly builds on those ideas with a narrower focus: article and subtitle translation through a local Codex subscription, larger shared context, paragraph-level streaming, persistent caching, and an AI repair loop.
+Transly builds on those ideas with a narrower focus: high-quality article translation through a local Codex subscription, larger shared context, paragraph-level streaming, persistent caching, and an AI repair loop. Video subtitle translation remains an experimental secondary feature.
 
 Thank you to the Immersive Translate team for establishing many of the interaction and engineering patterns that made this project possible. Transly is an independent implementation and is not affiliated with or endorsed by Immersive Translate.
 
