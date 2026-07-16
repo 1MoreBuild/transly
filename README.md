@@ -192,11 +192,27 @@ TRANSLY_CODEX_MODEL=gpt-5.6-luna
 
 Select the repository root, not `src/`, when using **Load unpacked**.
 
+## Credits
+
+Transly owes a substantial design debt to [Immersive Translate](https://immersivetranslate.com/). Immersive Translate pioneered a fluid bilingual reading experience for the web and showed how much careful DOM handling matters to translation quality.
+
+Many of Transly's product and engineering decisions were informed by studying its approach, including:
+
+- placing translations alongside the original page without replacing its reading structure;
+- identifying translatable article blocks while excluding navigation and hidden interface content;
+- protecting links, code, formulas, and other inline elements with placeholders;
+- preserving source styles and supporting bilingual and translation-only reading modes;
+- handling website compatibility and video subtitle translation as first-class problems.
+
+Transly builds on those ideas with a narrower focus: article and subtitle translation through a local Codex subscription, larger shared context, paragraph-level streaming, persistent caching, and an AI repair loop.
+
+Thank you to the Immersive Translate team for establishing many of the interaction and engineering patterns that made this project possible. Transly is an independent implementation and is not affiliated with or endorsed by Immersive Translate.
+
 ## Project Status
 
 Transly currently reads local Codex OAuth state and calls the ChatGPT Codex Responses backend directly. That backend is not a public stable API, so compatibility updates may be required when Codex changes.
 
-This repository is an independent implementation, not a fork of Immersive Translate. High-level reverse-engineering notes are kept under `docs/`; proprietary extension source is not part of this repository.
+High-level reverse-engineering notes are kept under `docs/`; proprietary extension source is not part of this repository.
 
 ## License
 
