@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file gives coding agents the durable context needed to work on Transly.
+This file gives agents the durable context needed to install or work on Transly.
 Keep implementation details in the source, tests, and focused documentation so
 this file does not become a second, stale specification.
 
@@ -9,13 +9,30 @@ this file does not become a second, stale specification.
 Transly is a local-first Chrome extension for:
 
 - Article translation.
-- Video subtitle translation.
+- Video subtitle translation as a beta feature.
 
 Translation quality is the primary product requirement. Preserve meaning,
 voice, terminology, links, and the document structure needed to render a clear
 translation.
 
 Do not add unrelated translation workflows unless the requested scope changes.
+
+## Installing Transly For A User
+
+When the user asks to install or set up Transly:
+
+1. Read the Install Transly section in `README.md` and inspect the current
+   worktree before taking action.
+2. Do not edit product source as part of a normal installation.
+3. Run `npm install`, then `npm run setup`. Let the command report missing
+   macOS, Chrome, Node.js, or Codex login requirements instead of guessing.
+4. Run `npm test` after setup. Do not run `native:smoke` or any other real model
+   request without explicit user approval because it consumes subscription
+   capacity.
+5. If browser control is available, load the repository root as an unpacked
+   Chrome extension. Otherwise return its exact absolute path and the remaining
+   `chrome://extensions` action.
+6. Report completed checks, manual steps, and whether any model request ran.
 
 ## Sources Of Truth
 

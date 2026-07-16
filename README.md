@@ -15,7 +15,7 @@
     <a href="#why-transly">Why Transly</a> ·
     <a href="#what-it-does">Features</a> ·
     <a href="#transly-vs-immersive-translate">Comparison</a> ·
-    <a href="#quick-start">Quick Start</a> ·
+    <a href="#install-transly">Agent Install</a> ·
     <a href="#how-it-works">How It Works</a> ·
     <a href="#development">Development</a>
   </p>
@@ -74,9 +74,35 @@ Choose Transly for a focused, local-first reading tool that can use more context
 > [!IMPORTANT]
 > Transly's quality advantage is an architectural goal, not yet a published benchmark result. The project is designed to improve long-form coherence through larger shared context and a translation-focused prompt; actual results still depend on the page, language, and model.
 
-## Quick Start
+## Install Transly
 
-### 1. Prepare your machine
+### For agents
+
+Paste this into Codex or another coding agent with terminal access:
+
+```text
+Install the Transly Chrome extension on this Mac from
+https://github.com/1MoreBuild/transly.
+
+Read the repository's AGENTS.md and README.md first. Then:
+1. Clone the repository to ~/Projects/transly, or safely reuse it if it already exists.
+2. Check the local prerequisites and tell me if Codex needs an interactive login.
+3. Install dependencies and run the repository's setup command.
+4. Verify the Native Host connection and run the normal test suite.
+5. Do not run smoke tests or send any real model request without asking me first.
+6. If you can control Chrome, load the repository root as an unpacked extension.
+   Otherwise, give me the exact absolute folder to select in chrome://extensions.
+7. Do not change product source code just to complete installation.
+
+Finish by reporting what succeeded, what still needs manual action, and whether
+any command consumed Codex subscription capacity.
+```
+
+The agent can complete the command-line setup. You may still need to finish an interactive ChatGPT login or approve the unpacked extension in Chrome.
+
+### For humans
+
+#### 1. Prepare your machine
 
 You need:
 
@@ -91,7 +117,7 @@ If needed, authenticate Codex first:
 codex login
 ```
 
-### 2. Install Transly
+#### 2. Clone and set up Transly
 
 ```bash
 git clone https://github.com/1MoreBuild/transly.git
@@ -102,7 +128,7 @@ npm run setup
 
 `npm run setup` checks the local requirements, installs the user-level Native Messaging Host, and verifies the connection. It does not send a model request.
 
-### 3. Load the Chrome extension
+#### 3. Load the Chrome extension
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
