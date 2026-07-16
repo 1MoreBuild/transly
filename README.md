@@ -35,13 +35,26 @@ Transly translates long-form web articles as coherent documents, not isolated fr
 Paste this into Codex or another coding agent with terminal access:
 
 ```text
-Install the Transly Chrome extension from https://github.com/1MoreBuild/transly.
-Read AGENTS.md first. Use an existing checkout, or ask me where to clone it.
-Run npm install, npm run setup, and npm test. Do not run smoke tests or any real
-model request without asking me. Do not install the extension through browser
-automation. When setup is complete, give me the repository root's exact absolute
-path and tell me to load that folder from chrome://extensions using Load unpacked.
-Report what succeeded and whether a model request ran.
+Install the Transly Chrome extension from https://github.com/1MoreBuild/transly
+end to end. Work autonomously and only pause when I must complete a browser login
+or the final Chrome extension loading step.
+
+Use the current checkout if it is Transly. Otherwise clone the repository into a
+`transly` folder in the current workspace without asking me where to put it. If
+that folder already contains Transly, reuse it. If the name is occupied by
+unrelated files, use `transly-install` and continue instead of asking. Then enter
+the repository and read AGENTS.md and README.md.
+
+Run `codex login status`. If Codex is not logged in with ChatGPT, run `codex login`
+yourself in an interactive terminal, let me complete the browser authorization,
+wait for it to finish, and then continue automatically. Run `npm install`,
+`npm run setup`, and `npm test`.
+Do not run smoke tests or send any real model request without asking me first.
+
+Do not install the extension through browser automation. When setup is complete,
+give me the repository root's exact absolute path and tell me to open
+chrome://extensions, enable Developer mode, choose Load unpacked, and select that
+folder. Report what succeeded and whether a model request ran.
 ```
 
 ### For humans

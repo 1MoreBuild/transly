@@ -21,21 +21,30 @@ Do not add unrelated translation workflows unless the requested scope changes.
 
 When the user asks to install or set up Transly:
 
-1. Read the Install Transly section in `README.md` and inspect the current
-   worktree before taking action.
-2. Use the current checkout when available. Otherwise ask the user where to
-   clone the repository; do not assume a home-directory workspace.
-3. Do not edit product source as part of a normal installation.
-4. Run `npm install`, then `npm run setup`. Let the command report missing
-   macOS, Chrome, Node.js, or Codex login requirements instead of guessing.
-5. Run `npm test` after setup. Do not run `native:smoke` or any other real model
+1. Work autonomously. Only pause when the user must complete an interactive
+   browser login or load the unpacked extension in Chrome.
+2. Use the current checkout when it is Transly. Otherwise clone the repository
+   into a `transly` folder in the current workspace without asking where to put
+   it. Reuse that folder when it already contains a Transly checkout. If the
+   name is occupied by unrelated files, use `transly-install` and continue.
+3. Enter the repository, read the Install Transly section in `README.md`, and
+   inspect the worktree before taking further action.
+4. Do not edit product source as part of a normal installation.
+5. Run `codex login status`. If Codex is not logged in with ChatGPT, run
+   `codex login` yourself in an interactive terminal, keep the command active
+   while the user completes the browser authorization, and continue
+   automatically when it succeeds. Do not merely tell the user to run the
+   command.
+6. Run `npm install`, then `npm run setup`. Let the command report missing
+   macOS, Chrome, or Node.js requirements instead of guessing.
+7. Run `npm test` after setup. Do not run `native:smoke` or any other real model
    request without explicit user approval because it consumes subscription
    capacity.
-6. Do not install the extension through browser automation. Return the
+8. Do not install the extension through browser automation. Return the
    repository root's exact absolute path and ask the user to open
    `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and
    select that folder.
-7. Report completed checks, manual steps, and whether any model request ran.
+9. Report completed checks, manual steps, and whether any model request ran.
 
 ## Sources Of Truth
 
