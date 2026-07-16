@@ -5,4 +5,4 @@ node_modules/
 !.env.example
 dist/
 coverage/
-research/immersive-translate/1.30.3_0/
+research/immersive-translate/*/

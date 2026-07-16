@@ -97,7 +97,7 @@ function normalizeModel(model) {
 
 function resolveCodexHome() {
   return process.env.CODEX_HOME
-    ? path.resolve(process.env.CODEX_HOME.replace(/^~/, os.homedir()))
+    ? path.resolve(process.env.CODEX_HOME.replace(/^~(?=$|[\\/])/, os.homedir()))
     : path.join(os.homedir(), ".codex");
 }
 

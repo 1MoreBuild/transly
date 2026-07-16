@@ -23,16 +23,18 @@ When the user asks to install or set up Transly:
 
 1. Read the Install Transly section in `README.md` and inspect the current
    worktree before taking action.
-2. Do not edit product source as part of a normal installation.
-3. Run `npm install`, then `npm run setup`. Let the command report missing
+2. Use the current checkout when available. Otherwise ask the user where to
+   clone the repository; do not assume a home-directory workspace.
+3. Do not edit product source as part of a normal installation.
+4. Run `npm install`, then `npm run setup`. Let the command report missing
    macOS, Chrome, Node.js, or Codex login requirements instead of guessing.
-4. Run `npm test` after setup. Do not run `native:smoke` or any other real model
+5. Run `npm test` after setup. Do not run `native:smoke` or any other real model
    request without explicit user approval because it consumes subscription
    capacity.
-5. If browser control is available, load the repository root as an unpacked
+6. If browser control is available, load the repository root as an unpacked
    Chrome extension. Otherwise return its exact absolute path and the remaining
    `chrome://extensions` action.
-6. Report completed checks, manual steps, and whether any model request ran.
+7. Report completed checks, manual steps, and whether any model request ran.
 
 ## Sources Of Truth
 

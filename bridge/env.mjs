@@ -1,7 +1,9 @@
 import { readFileSync, existsSync } from "node:fs";
-import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-export function loadLocalEnv(file = path.resolve(process.cwd(), ".env.local")) {
+const DEFAULT_LOCAL_ENV = fileURLToPath(new URL("../.env.local", import.meta.url));
+
+export function loadLocalEnv(file = DEFAULT_LOCAL_ENV) {
   if (!existsSync(file)) return;
 
   const text = readFileSync(file, "utf8");

@@ -36,10 +36,10 @@ Paste this into Codex or another coding agent with terminal access:
 
 ```text
 Install the Transly Chrome extension from https://github.com/1MoreBuild/transly.
-Read AGENTS.md first. Clone or safely reuse ~/Projects/transly, run npm install,
-npm run setup, and npm test. Do not run smoke tests or any real model request
-without asking me. Load the repository root as an unpacked Chrome extension if
-you can control Chrome; otherwise give me the exact folder to select. Report
+Read AGENTS.md first. Use an existing checkout, or ask me where to clone it.
+Run npm install, npm run setup, and npm test. Do not run smoke tests or any real
+model request without asking me. Load the repository root as an unpacked Chrome
+extension if you can control Chrome; otherwise give me its exact path. Report
 what succeeded, any manual step left, and whether a model request ran.
 ```
 

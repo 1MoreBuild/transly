@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve("research/immersive-translate/1.30.3_0");
+const snapshotsDir = fileURLToPath(new URL("../research/immersive-translate/", import.meta.url));
+const root = process.env.TRANSLY_IMMERSIVE_SNAPSHOT
+  ? path.resolve(process.env.TRANSLY_IMMERSIVE_SNAPSHOT)
+  : findLatestSnapshot(snapshotsDir);
 const [relativeFile, ...terms] = process.argv.slice(2);
 
 if (!relativeFile || terms.length === 0) {
@@ -11,7 +15,7 @@ if (!relativeFile || terms.length === 0) {
 
 const file = path.resolve(root, relativeFile);
 if (!file.startsWith(root + path.sep)) {
-  console.error("File must be under research/immersive-translate/1.30.3_0");
+  console.error(`File must be under ${root}`);
   process.exit(1);
 }
 
@@ -44,4 +48,16 @@ for (const term of terms) {
   if (hits === 0) {
     console.log("No hits.");
   }
+}
+
+function findLatestSnapshot(directory) {
+  const snapshots = fs.readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+  const latest = snapshots.at(-1);
+  if (!latest) {
+    throw new Error(`No local Immersive Translate snapshot found under ${directory}`);
+  }
+  return path.join(directory, latest);
 }

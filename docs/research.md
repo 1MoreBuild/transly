@@ -89,7 +89,7 @@ Machine state:
 
 - `codex` is resolved from the user's `PATH`.
 - `codex doctor` must report ChatGPT token auth is configured.
-- `openclaw` is not part of this project. A stale local wrapper at `~/.local/bin/openclaw` was removed because it pointed to a deleted Opero app.
+- `openclaw` is not part of this project. A stale local wrapper was removed because it pointed to a deleted app.
 
 Decision:
 
