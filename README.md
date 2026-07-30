@@ -1,170 +1,139 @@
 <div align="center">
   <img src="assets/transly-logo.png" width="128" alt="Transly logo">
   <h1>Transly</h1>
-  <p><strong>High-context article translation for Chrome, powered by your Codex subscription.</strong></p>
+  <p><strong>Context-aware AI translation for Chrome.</strong></p>
 
   <p>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111" alt="MIT License"></a>
-    <img src="https://img.shields.io/badge/platform-macOS-111111" alt="macOS">
     <img src="https://img.shields.io/badge/browser-Chrome-4285F4" alt="Chrome">
-    <img src="https://img.shields.io/badge/powered%20by-Codex-FFC107" alt="Powered by Codex">
-  </p>
-
-  <p>
-    <a href="#why-transly">Why Transly</a> ·
-    <a href="#install-transly">Agent Install</a> ·
-    <a href="#features">Features</a> ·
-    <a href="#transly-vs-immersive-translate">Comparison</a> ·
-    <a href="#how-it-works">Architecture</a> ·
-    <a href="#credits">Credits</a>
+    <img src="https://img.shields.io/badge/API-OpenAI%20compatible-FFC107" alt="OpenAI-compatible API">
   </p>
 </div>
 
-Transly translates long-form web articles as coherent documents, not isolated fragments. It sends each batch with shared article context to Codex, then inserts complete, validated paragraphs as they become ready.
+Transly is an open-source Chrome extension for translating web articles with an OpenAI-compatible model service you choose. It reads articles as documents instead of sending isolated fragments, which gives the model more context for terminology, tone, and meaning.
 
 ## Why Transly
 
-- **Better long-form coherence.** More shared context helps preserve terminology, tone, and meaning across an article.
-- **No separate API bill.** Transly uses your existing Codex login, with no API key or per-token API charge. Codex subscription limits still apply.
-- **Built for reading.** Bilingual and translation-only layouts preserve links, code, formulas, and the original page structure.
+- **Document-level context.** Paragraph batches share article context for more coherent long-form translation.
+- **Built for reading.** Translations appear inside the original page with links, lists, tables, code, formulas, and layout preserved.
+- **Progress without flicker.** Complete translated paragraphs appear as soon as each model batch returns.
+- **Two reading modes.** Switch between bilingual comparison and translation-only reading; click a translation to reveal its original.
+- **Bring your own model service.** Connect Lane automatically, or use any hosted API, self-hosted gateway, or local proxy that exposes a compatible endpoint.
+- **Local extension storage.** Provider settings and validated translations stay in Chrome's local extension storage.
 
-## Install Transly
+Article translation is the primary product. Video subtitle translation is available as an early beta. PDF, EPUB, OCR, image translation, and input-box translation are not supported.
 
-### For agents
+## Install From Source
 
-Paste this into Codex or another coding agent with terminal access:
+### With an agent
+
+Give this instruction to an agent with terminal access:
 
 ```text
-Install the Transly Chrome extension from https://github.com/1MoreBuild/transly
-end to end. Work autonomously and only pause when I must complete a browser login
-or the final Chrome extension loading step.
+Install the Transly Chrome extension from https://github.com/1MoreBuild/transly.
+Use the current checkout if it is Transly; otherwise clone it into a `transly`
+folder in the current workspace without asking me for a path. Read AGENTS.md,
+run the test suite, and do not make product changes during installation.
 
-Use the current checkout if it is Transly. Otherwise clone the repository into a
-`transly` folder in the current workspace without asking me where to put it. If
-that folder already contains Transly, reuse it. If the name is occupied by
-unrelated files, use `transly-install` and continue instead of asking. Then enter
-the repository and read AGENTS.md and README.md.
-
-Run `codex login status`. If Codex is not logged in with ChatGPT, run `codex login`
-yourself in an interactive terminal, let me complete the browser authorization,
-wait for it to finish, and then continue automatically. Run `npm install`,
-`npm run setup`, and `npm test`.
-Do not run smoke tests or send any real model request without asking me first.
-
-Do not install the extension through browser automation. When setup is complete,
-give me the repository root's exact absolute path and tell me to open
-chrome://extensions, enable Developer mode, choose Load unpacked, and select that
-folder. Report what succeeded and whether a model request ran.
+When ready, give me the exact repository root to select in Chrome. Tell me to
+open chrome://extensions, enable Developer mode, choose Load unpacked, and select
+that folder. Then tell me to open Transly's Configure page and enter my API URL,
+API key when required, and model. Do not send a real model request without asking first.
 ```
 
-### For humans
-
-Requires macOS, Chrome 105+, Node.js 20+, and Codex CLI logged in with ChatGPT.
+### Manually
 
 ```bash
-codex login # only if needed
 git clone https://github.com/1MoreBuild/transly.git
-cd transly
-npm install
-npm run setup
 ```
 
-Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the `transly` repository root. `setup` installs and verifies the Native Host without sending a model request.
+Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the cloned `transly` folder.
 
-## Features
+Open Transly. If [Lane](https://github.com/1MoreBuild/Lane) is installed and has
+a provider, Transly connects to it automatically. Otherwise choose
+**Configure** to search for another local service or enter a hosted API URL and
+key. Transly loads the service's available model names into a dropdown so you do
+not need to guess a model ID.
 
-- Context-aware article batches with natural target-language translation.
-- Complete paragraphs stream into the page as they become ready.
-- Bilingual and translation-only modes with click-to-reveal originals.
-- Links, line breaks, code, formulas, and protected elements stay intact.
-- AI coverage audit and a persistent 30-day local response cache.
-- **Beta:** video subtitles for YouTube timed text, WebVTT, and Bilibili subtitle JSON.
+See [Provider Setup](docs/providers.md) for compatible endpoint formats, examples, and security guidance.
 
-PDF, EPUB, OCR, image translation, and input-box translation are not supported.
+## Translation Providers
 
-## Transly vs. Immersive Translate
+Transly calls an OpenAI-compatible endpoint. It does not bundle a model, sell
+model access, or implement provider authentication. Lane is an optional
+companion for automatic local provider setup; manual API configuration remains
+fully supported.
 
-Transly is narrower than [Immersive Translate](https://immersivetranslate.com/). It trades feature breadth for a translation pipeline focused on long articles and larger shared context.
+Your provider can be:
+
+- [Lane](https://github.com/1MoreBuild/Lane), connected automatically through
+  Chrome Native Messaging;
+- a hosted model API;
+- a self-hosted OpenAI-compatible service;
+- an API gateway or local proxy, such as [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
+
+CLIProxyAPI is one optional integration, not a Transly dependency. Provider availability, pricing, authentication, rate limits, data handling, and reliability remain the provider's responsibility.
+
+Lane connection uses Chrome Native Messaging and does not scan ports. Discovery
+for other local services runs only when you click **Find other local services**.
+It checks a small fixed set of loopback addresses, sends no stored API key, and
+does not scan the network.
+
+## Transly And Immersive Translate
+
+[Immersive Translate](https://immersivetranslate.com/) is the closest product reference for Transly and informed much of its bilingual reading experience. The two products currently make different tradeoffs:
 
 | | Transly | Immersive Translate |
 | --- | --- | --- |
-| Focus | Context-rich article translation through Codex | Mature, all-in-one translation across formats and platforms |
-| Model cost | Uses an existing Codex subscription; no separate API bill | Depends on product tier and selected translation service |
+| Primary focus | High-context article translation | Translation across many formats and platforms |
+| Model access | User-configured OpenAI-compatible endpoint | Built-in and custom translation services |
+| Article strategy | Larger context shared across model batches | Mature progressive translation pipeline |
 | Scope | Articles; video subtitles in beta | Websites, PDFs, EPUBs, images, subtitles, input boxes, and more |
-| Maturity | Early-stage, macOS-only open source | Broad compatibility across desktop and mobile platforms |
+| Maturity | Early-stage open source | Mature cross-platform product |
 
-Transly is designed for stronger long-form coherence, but this is not yet a published benchmark result.
+Transly's larger-context approach is designed to improve terminology, tone, and long-form coherence. Translation quality still depends on the configured model and has not yet been measured in a published benchmark.
 
 ## How It Works
 
 ```mermaid
 flowchart LR
-  Page["Web article"] --> Extension["Chrome extension"]
-  Extension --> Host["Local Native Host"]
-  Host --> Codex["ChatGPT Codex"]
-  Codex --> Host
-  Host --> Cache["Private local cache"]
-  Host --> Extension
-  Extension --> Result["Bilingual article"]
+  Page["Web article"] --> Extension["Transly Chrome extension"]
+  Extension -. "Automatic local setup" .-> Lane["Lane (optional)"]
+  Lane --> Provider
+  Extension --> Provider["Configured OpenAI-compatible API"]
+  Provider --> Extension
+  Extension --> Cache["Chrome local response cache"]
+  Extension --> Result["Translated page"]
 ```
 
-The extension extracts visible content and protects page structure. A local Native Host owns Codex authentication, request concurrency, caching, diagnostics, and optional tracing. OAuth credentials never enter webpage code or the extension UI.
+The extension service worker sends extracted text directly to the configured API. API keys are stored in `chrome.storage.local`, are not exposed to webpage scripts, and are not synced through Chrome Sync. Validated translations are cached locally for 30 days.
 
-See [docs/architecture.md](docs/architecture.md) for the full protocol and security boundary.
-
-## Local by Default
-
-- Responses are cached under `~/Library/Caches/Transly/responses/` for 30 days, with private file permissions and a 1,000-entry limit.
-- Redacted timing logs live under `~/Library/Logs/Transly/`; they exclude article text, prompts, outputs, and credentials.
-- Langfuse is optional and disabled without configuration.
-
-<details>
-<summary><strong>Enable Langfuse tracing</strong></summary>
-
-Copy `.env.example` to `.env.local` and set:
-
-```bash
-LANGFUSE_SECRET_KEY=...
-LANGFUSE_PUBLIC_KEY=...
-LANGFUSE_BASE_URL=https://cloud.langfuse.com
-```
-
-Tracing sends model prompts and outputs, including translated page text, to your configured Langfuse project. OAuth credentials remain redacted.
-
-</details>
+Read [Architecture](docs/architecture.md) for the request flow and trust boundaries.
 
 ## Development
 
+Node.js 20 or newer is only needed for development commands:
+
 ```bash
-npm test                    # No model request
-npm run preflight           # Check local requirements
-npm run native:doctor       # Verify the Native Host
-npm run native:smoke        # One real model request
-npm run native:smoke:concurrent
-npm run logs -- --limit 80
+npm test
+npm run package
+git diff --check
 ```
 
-Smoke tests consume Codex subscription capacity. After source changes, reload the extension from `chrome://extensions`.
+The test suite does not send model requests. Reload Transly from `chrome://extensions` after source changes. `npm run package` creates a clean Chrome Web Store archive under `dist/`.
 
-<details>
-<summary><strong>Troubleshooting</strong></summary>
-
-- Native Host disconnected: run `npm run native:doctor`, then `npm run native:install`.
-- Repository moved: run `npm run setup` again.
-- Model unavailable: set `TRANSLY_CODEX_MODEL` in `.env.local`.
-- Chrome load error: select the repository root, not `src/`.
-
-</details>
+Before the first Chrome Web Store release, upload an unpublished draft, copy
+its public key into `manifest.json`, and verify that the resulting unpacked ID
+matches the Dashboard Item ID. Lane's fixed Transly allowlist must be updated
+to that verified ID before either production build is released. Do not replace
+the fixed allowlist with a wildcard. See Chrome's
+[manifest key documentation](https://developer.chrome.com/docs/extensions/reference/manifest/key).
 
 ## Credits
 
-Transly owes a substantial design debt to [Immersive Translate](https://immersivetranslate.com/). Its bilingual reading model, DOM-aware extraction, placeholder protection, style preservation, site compatibility work, and subtitle support informed many of Transly's product and engineering decisions.
+Transly owes a substantial design debt to [Immersive Translate](https://immersivetranslate.com/). Its bilingual reading model, DOM-aware extraction, placeholder protection, style preservation, site compatibility work, and subtitle support informed many product and engineering decisions.
 
-Transly is an independent implementation with a narrower focus on Codex-powered article translation. It is not affiliated with or endorsed by Immersive Translate, and proprietary extension source is not included in this repository.
-
-## Status
-
-Transly is an early-stage, macOS-only project. The ChatGPT Codex backend is not a public stable API and may require compatibility updates.
+Transly is an independent implementation and is not affiliated with or endorsed by Immersive Translate. Its production extension does not import Immersive Translate code, assets, services, or branding.
 
 ## License
 

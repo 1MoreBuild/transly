@@ -28,7 +28,6 @@ export function summarizePlaceholderIntegrity(sourceItems = [], translatedItems 
         affected = true;
       }
     }
-
     if (affected && sourceItem?.id) affectedItemIds.push(sourceItem.id);
   }
 

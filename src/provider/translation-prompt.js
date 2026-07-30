@@ -1,4 +1,4 @@
-const PASSAGE_SEPARATOR = "\n\n%%\n\n";
+const PASSAGE_BREAK_BASE = "<<<TRANSLY_PASSAGE_BREAK>>>";
 
 const LANGUAGE_NAMES = new Map([
   ["zh-CN", "Simplified Chinese"],
@@ -17,14 +17,16 @@ const LANGUAGE_NAMES = new Map([
 export function buildTranslationRequest(payload) {
   const targetLanguage = languageName(payload.targetLanguage);
   const isSubtitle = payload.mode === "subtitle";
+  const sourceTexts = payload.items.map((item) => String(item.text || "").trim());
+  const passageBreak = choosePassageBreak(sourceTexts);
   const instructions = isSubtitle
-    ? buildSubtitleInstructions(targetLanguage)
-    : buildArticleInstructions(targetLanguage);
+    ? buildSubtitleInstructions(targetLanguage, passageBreak)
+    : buildArticleInstructions(targetLanguage, passageBreak);
   const repairInstruction = payload.placeholderRepair
     ? "This is a repair retry. Before returning, verify that every [[TRANSLY_PH_n]] token from each passage appears exactly once in that passage's translation."
     : "";
   const context = cleanContext(payload.context);
-  const passages = payload.items.map((item) => String(item.text || "").trim()).join(PASSAGE_SEPARATOR);
+  const passages = sourceTexts.join(`\n\n${passageBreak}\n\n`);
 
   return {
     instructions: [instructions, repairInstruction].filter(Boolean).join("\n"),
@@ -41,14 +43,14 @@ export function normalizeTranslationResult(parsed, payload) {
     if (parsed.length !== payload.items.length) {
       throw new Error(`Translation item count mismatch: expected ${payload.items.length}, received ${parsed.length}`);
     }
-    const items = payload.items.map((item, index) => ({
-      id: item.id,
-      translation: requireTranslationString(parsed[index], index)
-    }));
-    return { items };
+    return {
+      items: payload.items.map((item, index) => ({
+        id: item.id,
+        translation: requireTranslationString(parsed[index], index)
+      }))
+    };
   }
 
-  // Keep compatibility with responses produced before the text-first protocol.
   const allowedIds = new Set(payload.items.map((item) => item.id));
   const byId = new Map();
   for (const item of parsed?.items || []) {
@@ -70,7 +72,7 @@ function requireTranslationString(value, label) {
   return value.trim();
 }
 
-function buildArticleInstructions(targetLanguage) {
+function buildArticleInstructions(targetLanguage, passageBreak) {
   const languageGuidance = buildArticleLanguageGuidance(targetLanguage);
   return [
     `You are a native ${targetLanguage} editorial translator.`,
@@ -83,7 +85,7 @@ function buildArticleInstructions(targetLanguage) {
     languageGuidance,
     "Translate headings as concise headings and prose as fluent prose.",
     `Before returning, silently edit every passage as a native ${targetLanguage} editor: remove awkward literal phrasing and source-language syntax while preserving every fact, distinction, and tone. Return only the edited final translation.`,
-    "Return only a valid JSON array of translated strings in input order, with exactly one string for each passage separated by %% in the input."
+    `Return only a valid JSON array of translated strings in input order, with exactly one string for each passage separated by ${passageBreak} in the input.`
   ].filter(Boolean).join("\n");
 }
 
@@ -95,13 +97,19 @@ function buildArticleLanguageGuidance(targetLanguage) {
   ].join(" ");
 }
 
-function buildSubtitleInstructions(targetLanguage) {
+function buildSubtitleInstructions(targetLanguage, passageBreak) {
   return [
     `You are a native ${targetLanguage} subtitle translator.`,
     `Write natural, concise ${targetLanguage} that is easy to read at playback speed.`,
     "Preserve meaning, tone, speaker intent, names, code, numbers, and placeholder tokens. Do not explain or add information.",
-    "Return only a valid JSON array of translated strings in input order, with exactly one string for each subtitle separated by %% in the input."
+    `Return only a valid JSON array of translated strings in input order, with exactly one string for each subtitle separated by ${passageBreak} in the input.`
   ].join("\n");
+}
+
+function choosePassageBreak(sourceTexts) {
+  let marker = PASSAGE_BREAK_BASE;
+  while (sourceTexts.some((text) => text.includes(marker))) marker += "_";
+  return marker;
 }
 
 function cleanContext(context) {

@@ -1,229 +1,192 @@
-const NATIVE_HOST_NAME = "com.1morebuild.transly";
-const NATIVE_PROTOCOL_VERSION = 1;
-const NATIVE_IDLE_TIMEOUT_MS = 60_000;
-const MAX_NATIVE_PAYLOAD_CHARS = 1_800_000;
+import {
+  providerSummary,
+  readProviderConfig,
+  validateProviderConnection,
+  validateProviderConfig,
+  writeProviderConfig
+} from "./provider/provider-config.js";
+import { listProviderModels, testProvider } from "./provider/openai-compatible.js";
+import { discoverLocalProviders } from "./provider/local-provider-discovery.js";
+import { connectLane } from "./provider/lane-native.js";
+import { createTranslationService } from "./provider/translation-service.js";
 
-let nativePort = null;
-let idleTimer = null;
-const pendingRequests = new Map();
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (sender.id !== chrome.runtime.id) return false;
-
-  if (message?.type === "TRANSLY_NATIVE_HEALTH") {
-    if (!sender.url?.startsWith(chrome.runtime.getURL("popup.html"))) return false;
-    postNativeRequest("health")
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((error) => sendResponse({ ok: false, error: formatNativeError(error) }));
-    return true;
-  }
-
-  if (message?.type === "TRANSLY_TRANSLATE") {
-    postNativeRequest("translate", message.payload, {
-      onProgress(data) {
-        relayTranslationProgress(sender, data);
-      }
-    })
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((error) => sendResponse({ ok: false, error: formatNativeError(error) }));
-    return true;
-  }
-
-  if (message?.type === "TRANSLY_AUDIT_ARTICLE") {
-    postNativeRequest("audit", message.payload)
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((error) => sendResponse({ ok: false, error: formatNativeError(error) }));
-    return true;
-  }
-
-  if (message?.type === "TRANSLY_GET_SETTINGS") {
-    chrome.storage.sync.get(
-      {
-        targetLanguage: "zh-CN",
-        articleDisplayMode: "bilingual",
-        articleBatchChars: 28000,
-        articleBatchMaxItems: 28,
-        articleContextChars: 36000,
-        enableArticleAuditLoop: true,
-        articleAuditMaxBlocks: 60,
-        articleAuditMaxRepairItems: 20,
-        subtitleBatchChars: 9000
-      },
-      (settings) => sendResponse({ ok: true, data: settings })
-    );
-    return true;
-  }
-
-  if (message?.type === "TRANSLY_SAVE_SETTINGS") {
-    chrome.storage.sync.set(message.payload || {}, () => sendResponse({ ok: true }));
-    return true;
-  }
-
-  return false;
+const DEFAULT_SETTINGS = Object.freeze({
+  targetLanguage: "zh-CN",
+  articleDisplayMode: "bilingual",
+  articleBatchChars: 28000,
+  articleBatchMaxItems: 28,
+  articleContextChars: 36000,
+  enableArticleAuditLoop: true,
+  articleAuditMaxBlocks: 60,
+  articleAuditMaxRepairItems: 20,
+  subtitleBatchChars: 9000
 });
 
-function postNativeRequest(type, payload = {}, options = {}) {
-  validateNativePayload(type, payload);
-  const port = getNativePort();
-  const id = crypto.randomUUID();
-  clearTimeout(idleTimer);
+export function registerBackground(chromeApi, dependencies = {}) {
+  const service = dependencies.service || createTranslationService();
+  const checkProvider = dependencies.testProvider || testProvider;
+  const listModels = dependencies.listProviderModels || listProviderModels;
+  const discoverProviders = dependencies.discoverLocalProviders || discoverLocalProviders;
+  const connectLaneProvider = dependencies.connectLane || (() => connectLane(chromeApi));
 
-  return new Promise((resolve, reject) => {
-    const timeout = type === "health"
-      ? setTimeout(() => {
-          if (!pendingRequests.delete(id)) return;
-          reject(nativeRequestError("NATIVE_REQUEST_TIMEOUT", "Native health check timed out."));
-          scheduleNativePortClose();
-        }, 15_000)
-      : null;
-    pendingRequests.set(id, { resolve, reject, timeout, onProgress: options.onProgress });
-    try {
-      port.postMessage({
-        protocolVersion: NATIVE_PROTOCOL_VERSION,
-        id,
-        type,
-        payload
+  Promise.resolve(chromeApi.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" })).catch(() => {
+    // Chrome 105+ supports this. Request handling still validates every caller.
+  });
+
+  chromeApi.runtime.onInstalled?.addListener((details) => {
+    if (details.reason === "install") chromeApi.runtime.openOptionsPage();
+  });
+
+  chromeApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (sender.id !== chromeApi.runtime.id) return false;
+
+    if (message?.type === "TRANSLY_PROVIDER_STATUS") {
+      readProviderConfig(chromeApi.storage.local)
+        .then(async (config) => {
+          if (providerSummary(config).configured) return config;
+          try {
+            const lane = await connectLaneProvider();
+            return await writeProviderConfig(chromeApi.storage.local, lane.config);
+          } catch {
+            return config;
+          }
+        })
+        .then((config) => sendResponse({ ok: true, data: providerSummary(config) }))
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+      return true;
+    }
+
+    if (message?.type === "TRANSLY_GET_PROVIDER_SETTINGS") {
+      if (!isOptionsPage(chromeApi, sender)) return false;
+      readProviderConfig(chromeApi.storage.local)
+        .then((config) => sendResponse({ ok: true, data: config }))
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+      return true;
+    }
+
+    if (message?.type === "TRANSLY_SAVE_PROVIDER_SETTINGS") {
+      if (!isOptionsPage(chromeApi, sender)) return false;
+      writeProviderConfig(chromeApi.storage.local, message.payload)
+        .then((config) => sendResponse({ ok: true, data: providerSummary(config) }))
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+      return true;
+    }
+
+    if (message?.type === "TRANSLY_TEST_PROVIDER") {
+      if (!isOptionsPage(chromeApi, sender)) return false;
+      Promise.resolve()
+        .then(() => validateProviderConfig(message.payload))
+        .then((config) => checkProvider(config))
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+      return true;
+    }
+
+    if (message?.type === "TRANSLY_LIST_PROVIDER_MODELS") {
+      if (!isOptionsPage(chromeApi, sender)) return false;
+      Promise.resolve()
+        .then(() => validateProviderConnection(message.payload))
+        .then((config) => listModels(config))
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+      return true;
+    }
+
+    if (message?.type === "TRANSLY_DISCOVER_LOCAL_PROVIDERS") {
+      if (!isOptionsPage(chromeApi, sender)) return false;
+      Promise.resolve(discoverProviders())
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+      return true;
+    }
+
+    if (message?.type === "TRANSLY_CONNECT_LANE") {
+      if (!isExtensionPage(chromeApi, sender)) return false;
+      Promise.resolve()
+        .then(() => connectLaneProvider())
+        .then(async (lane) => {
+          const config = await writeProviderConfig(chromeApi.storage.local, lane.config);
+          return {
+            config,
+            models: lane.models,
+            summary: providerSummary(config)
+          };
+        })
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+      return true;
+    }
+
+    if (message?.type === "TRANSLY_TRANSLATE") {
+      withProviderConfig(chromeApi, (config) => service.translate(message.payload, {
+        config,
+        onProgress(data) {
+          relayTranslationProgress(chromeApi, sender, data);
+        }
+      }))
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+      return true;
+    }
+
+    if (message?.type === "TRANSLY_AUDIT_ARTICLE") {
+      withProviderConfig(chromeApi, (config) => service.audit(message.payload, { config }))
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+      return true;
+    }
+
+    if (message?.type === "TRANSLY_GET_SETTINGS") {
+      chromeApi.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
+        const error = chromeApi.runtime.lastError;
+        sendResponse(error
+          ? { ok: false, error: error.message }
+          : { ok: true, data: settings });
       });
-    } catch (error) {
-      pendingRequests.delete(id);
-      clearTimeout(timeout);
-      reject(error);
-      scheduleNativePortClose();
+      return true;
     }
+
+    if (message?.type === "TRANSLY_SAVE_SETTINGS") {
+      chromeApi.storage.sync.set(message.payload || {}, () => {
+        const error = chromeApi.runtime.lastError;
+        sendResponse(error ? { ok: false, error: error.message } : { ok: true });
+      });
+      return true;
+    }
+
+    return false;
   });
 }
 
-function validateNativePayload(type, payload) {
-  if (type === "health") return;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw nativeRequestError("INVALID_PAYLOAD", "Native request payload must be an object.");
-  }
-  if (JSON.stringify(payload).length > MAX_NATIVE_PAYLOAD_CHARS) {
-    throw nativeRequestError("PAYLOAD_TOO_LARGE", "Translation request is too large.");
-  }
-
-  if (type === "translate") {
-    if (!Array.isArray(payload.items) || !payload.items.length || payload.items.length > 250) {
-      throw nativeRequestError("INVALID_ITEMS", "Translation request must contain 1 to 250 items.");
-    }
-    if (!["article", "subtitle"].includes(payload.mode)) {
-      throw nativeRequestError("INVALID_MODE", "Unsupported translation mode.");
-    }
-    if (typeof payload.targetLanguage !== "string" || !payload.targetLanguage || payload.targetLanguage.length > 40) {
-      throw nativeRequestError("INVALID_LANGUAGE", "Invalid target language.");
-    }
-    const ids = new Set();
-    let textChars = 0;
-    for (const item of payload.items) {
-      if (!item || typeof item.id !== "string" || !item.id || item.id.length > 128 || ids.has(item.id)) {
-        throw nativeRequestError("INVALID_ITEMS", "Translation item IDs must be unique strings.");
-      }
-      if (typeof item.text !== "string" || !item.text) {
-        throw nativeRequestError("INVALID_ITEMS", "Translation item text must be non-empty.");
-      }
-      ids.add(item.id);
-      textChars += item.text.length;
-    }
-    if (textChars > 1_500_000) {
-      throw nativeRequestError("PAYLOAD_TOO_LARGE", "Translation text is too large.");
-    }
-    return;
-  }
-
-  if (type === "audit") {
-    if (!Array.isArray(payload.blocks) || payload.blocks.length > 120) {
-      throw nativeRequestError("INVALID_BLOCKS", "Audit request must contain at most 120 blocks.");
-    }
-    if (typeof payload.targetLanguage !== "string" || !payload.targetLanguage || payload.targetLanguage.length > 40) {
-      throw nativeRequestError("INVALID_LANGUAGE", "Invalid target language.");
-    }
-    return;
-  }
-
-  throw nativeRequestError("UNSUPPORTED_REQUEST", `Unsupported native request type: ${type}`);
+async function withProviderConfig(chromeApi, operation) {
+  const stored = await readProviderConfig(chromeApi.storage.local);
+  const config = validateProviderConfig(stored);
+  return operation(config);
 }
 
-function nativeRequestError(code, message) {
-  const error = new Error(message);
-  error.code = code;
-  return error;
-}
-
-function getNativePort() {
-  if (nativePort) return nativePort;
-
-  const port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
-  nativePort = port;
-  port.onMessage.addListener((message) => {
-    if (message?.protocolVersion !== NATIVE_PROTOCOL_VERSION || typeof message.id !== "string") return;
-    const pending = pendingRequests.get(message.id);
-    if (!pending) return;
-    if (message.progress) {
-      try {
-        pending.onProgress?.(message.data);
-      } catch {
-        // Progress is best effort; the validated final response remains authoritative.
-      }
-      return;
-    }
-    pendingRequests.delete(message.id);
-    clearTimeout(pending.timeout);
-
-    if (message.ok) {
-      pending.resolve(message.data);
-    } else {
-      const error = new Error(message.error?.message || "Native host request failed.");
-      error.code = message.error?.code || "NATIVE_HOST_ERROR";
-      error.retryable = Boolean(message.error?.retryable);
-      pending.reject(error);
-    }
-    scheduleNativePortClose();
-  });
-
-  port.onDisconnect.addListener(() => {
-    const detail = chrome.runtime.lastError?.message || "Native host disconnected.";
-    nativePort = null;
-    clearTimeout(idleTimer);
-    for (const pending of pendingRequests.values()) {
-      clearTimeout(pending.timeout);
-      const error = new Error(detail);
-      error.code = "NATIVE_HOST_DISCONNECTED";
-      error.retryable = true;
-      pending.reject(error);
-    }
-    pendingRequests.clear();
-  });
-
-  return port;
-}
-
-function relayTranslationProgress(sender, data) {
+function relayTranslationProgress(chromeApi, sender, data) {
   const tabId = sender.tab?.id;
   if (!Number.isInteger(tabId) || !data || typeof data !== "object") return;
   const message = { type: "TRANSLY_TRANSLATION_PROGRESS", data };
-  const callback = () => void chrome.runtime.lastError;
+  const callback = () => void chromeApi.runtime.lastError;
   if (Number.isInteger(sender.frameId)) {
-    chrome.tabs.sendMessage(tabId, message, { frameId: sender.frameId }, callback);
+    chromeApi.tabs.sendMessage(tabId, message, { frameId: sender.frameId }, callback);
   } else {
-    chrome.tabs.sendMessage(tabId, message, callback);
+    chromeApi.tabs.sendMessage(tabId, message, callback);
   }
 }
 
-function scheduleNativePortClose() {
-  clearTimeout(idleTimer);
-  if (!nativePort || pendingRequests.size) return;
-  idleTimer = setTimeout(() => {
-    if (!nativePort || pendingRequests.size) return;
-    const port = nativePort;
-    nativePort = null;
-    port.disconnect();
-  }, NATIVE_IDLE_TIMEOUT_MS);
+function isOptionsPage(chromeApi, sender) {
+  return sender.url?.startsWith(chromeApi.runtime.getURL("options.html"));
 }
 
-function formatNativeError(error) {
-  const code = error?.code ? `[${error.code}] ` : "";
-  const hint = error?.code === "NATIVE_HOST_DISCONNECTED"
-    ? " Run `npm run native:doctor` and `npm run native:install`."
-    : "";
-  return `${code}${String(error?.message || error)}${hint}`;
+function isExtensionPage(chromeApi, sender) {
+  return sender.url?.startsWith(chromeApi.runtime.getURL(""));
 }
+
+function formatError(error) {
+  const code = error?.code ? `[${error.code}] ` : "";
+  return `${code}${String(error?.message || error)}`;
+}
+
+if (globalThis.chrome?.runtime?.onMessage) registerBackground(globalThis.chrome);

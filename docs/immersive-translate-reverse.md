@@ -107,7 +107,7 @@ The presence of `contextReqLength` matters. Immersive Translate does request art
 Our implication:
 
 - Their design optimizes cost, latency, and viewport relevance.
-- Our Codex-subscription design should prefer fewer, larger requests with explicit full-article context.
+- Our high-context translation design should prefer fewer, larger requests with explicit full-article context.
 - A good v1 default is still capped, for example 30k-40k chars of context and 20k-30k chars per batch.
 
 ## Page Translation Flow
@@ -293,7 +293,7 @@ Our implication:
 
 - Loading should be a real per-paragraph translation node, inserted in the same position where the final translation will appear.
 - On success, replace the loading node in place.
-- On failure, replace it with a small retry/error node or remove it if the bridge is unreachable.
+- On failure, replace it with a small retry/error node or remove it if the provider request cannot be completed.
 - Avoid debug outlines for normal loading; outlines are useful only for development.
 
 ## Rich Text Handling
@@ -352,9 +352,9 @@ It also has a strict rate limiter:
 
 Our implication:
 
-- Its small-request design is correct for paid APIs, but wrong for Codex subscription auth because many small calls hit rate limits faster.
-- Our Native Host should be the single concurrency authority, run at most five requests at once, and cache by URL/language/text hash.
-- Langfuse should trace one high-level translate request plus each model batch.
+- Its small-request design reduces paid API usage, but too many requests can increase latency and hit provider rate limits faster.
+- The extension service worker should be the single concurrency authority, run at most five model requests at once, and cache by provider/model/content identity.
+- Provider-side tracing is outside Transly's extension boundary and can be implemented by the configured API gateway.
 
 ## Subtitle Architecture
 
@@ -469,7 +469,7 @@ For YouTube:
 
 Our implication:
 
-- For our Codex model path, translating five cues per request is too chatty.
+- For our model translation path, translating five cues per request is too chatty.
 - Better v1: when we can capture the whole subtitle file, translate the whole file or large cue batches.
 - For live/dynamic cues, use a rolling queue and batch by time window/text budget.
 
@@ -484,7 +484,7 @@ Borrow:
 - Leaf block fallback for modern `div`-based articles.
 - Separate internal cue model.
 - Reversible rendering.
-- Cache plus one explicit Native Host concurrency limit.
+- Cache plus one explicit service-worker model concurrency limit.
 
 Do not borrow:
 

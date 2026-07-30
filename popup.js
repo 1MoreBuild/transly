@@ -2,7 +2,9 @@ const targetLanguage = document.querySelector("#targetLanguage");
 const statusEl = document.querySelector("#status");
 const connectionBadge = document.querySelector("#connectionBadge");
 const connectionLabel = document.querySelector("#connectionLabel");
+const providerValue = document.querySelector("#providerValue");
 const modelValue = document.querySelector("#modelValue");
+const configureProvider = document.querySelector("#configureProvider");
 const articleDisplayMode = document.querySelector("#articleDisplayMode");
 const translateArticle = document.querySelector("#translateArticle");
 const clearArticle = document.querySelector("#clearArticle");
@@ -11,33 +13,43 @@ const subtitleToggle = document.querySelector("#subtitleToggle");
 const subtitleState = document.querySelector("#subtitleState");
 const popupParams = new URLSearchParams(location.search);
 const sourceTabId = Number(popupParams.get("tabId") || 0);
+let providerReady = false;
+let currentArticleStatus = "idle";
 
 initialize();
 
 async function initialize() {
-  await Promise.all([loadNativeHealth(), loadSettings(), loadPageState()]);
+  await Promise.all([loadProviderStatus(), loadSettings(), loadPageState()]);
 }
 
-async function loadNativeHealth() {
-  const response = await sendRuntimeMessage({ type: "TRANSLY_NATIVE_HEALTH" });
-  if (response?.ok && response.data?.credentials?.available !== false) {
-    const model = response.data.model || "Codex";
+async function loadProviderStatus() {
+  const response = await sendRuntimeMessage({ type: "TRANSLY_PROVIDER_STATUS" });
+  if (response?.ok && response.data?.configured) {
+    const model = response.data.model || "Custom model";
+    providerReady = true;
     connectionBadge.dataset.state = "ready";
-    connectionLabel.textContent = "Connected";
+    connectionLabel.textContent = "Configured";
+    providerValue.textContent = response.data.host || "Custom API";
+    providerValue.title = response.data.host || "Custom API";
     modelValue.textContent = model;
     modelValue.title = model;
-    showStatus("Local Native Host is ready.", "ready");
+    showStatus("Translation service is ready.", "ready");
+    updateArticleState(currentArticleStatus);
+    updateSubtitleState(subtitleToggle.checked);
     return;
   }
 
+  providerReady = false;
   connectionBadge.dataset.state = "error";
-  connectionLabel.textContent = response?.ok ? "Login required" : "Offline";
-  modelValue.textContent = "Unavailable";
-  showStatus(
-    response?.data?.credentials?.error || response?.error || "Codex ChatGPT login is unavailable.",
-    "error"
-  );
+  connectionLabel.textContent = "Setup required";
+  providerValue.textContent = "Custom API";
+  modelValue.textContent = "Not configured";
+  updateArticleState(currentArticleStatus);
+  updateSubtitleState(subtitleToggle.checked);
+  showStatus(response?.error || "Add an API URL, key, and model to begin.", "error");
 }
+
+configureProvider.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
 async function loadSettings() {
   const response = await sendRuntimeMessage({ type: "TRANSLY_GET_SETTINGS" });
@@ -157,9 +169,10 @@ function setTargetLanguage(value) {
 
 function updateArticleState(status) {
   const normalized = ["running", "translated", "error"].includes(status) ? status : "idle";
+  currentArticleStatus = normalized;
   const running = normalized === "running";
   const translated = normalized === "translated";
-  translateArticle.disabled = running;
+  translateArticle.disabled = running || !providerReady;
   translateArticle.setAttribute("aria-busy", String(running));
   translateArticle.querySelector("span").textContent = running
     ? "Translation in progress"
@@ -176,6 +189,7 @@ function updateArticleState(status) {
 
 function updateSubtitleState(enabled) {
   subtitleToggle.checked = enabled;
+  subtitleToggle.disabled = !providerReady;
   subtitleState.textContent = enabled ? "On" : "Off";
 }
 

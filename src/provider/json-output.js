@@ -1,6 +1,6 @@
 export function parseJsonOutput(raw) {
   const text = String(raw || "").trim();
-  if (!text) throw new Error("Codex returned empty output.");
+  if (!text) throw providerOutputError("The translation service returned empty output.");
 
   try {
     return JSON.parse(text);
@@ -22,9 +22,13 @@ export function parseJsonOutput(raw) {
     } catch {}
   }
 
-  const error = new Error("Codex returned non-JSON output.");
+  throw providerOutputError("The translation service returned invalid JSON.");
+}
+
+function providerOutputError(message) {
+  const error = new Error(message);
   error.code = "INVALID_MODEL_OUTPUT";
-  throw error;
+  return error;
 }
 
 function readBalancedJson(text, start) {

@@ -1,98 +1,26 @@
 # AGENTS.md
 
-This file gives agents the durable context needed to install or work on Transly.
-Keep implementation details in the source, tests, and focused documentation so
-this file does not become a second, stale specification.
+Transly is a Chrome extension for context-aware AI translation through a user-configured OpenAI-compatible API. Article translation is the primary product; video subtitle translation is experimental.
 
-## Product Scope
+## Installing For A User
 
-Transly is a local-first Chrome extension for:
+When asked to install Transly:
 
-- Article translation.
-- Video subtitle translation as a beta feature.
+1. Reuse the current checkout if it is Transly. Otherwise clone the repository into a `transly` folder in the current workspace without asking where to put it. Use `transly-install` only if that name contains unrelated files.
+2. Read `README.md`, inspect the worktree, and run `npm test`. Do not modify product source during a normal installation.
+3. Do not send a real model request without explicit approval.
+4. Browser automation cannot reliably complete Chrome's **Load unpacked** flow. Return the repository root's exact absolute path and ask the user to open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select that folder.
+5. Ask the user to open Transly's **Configure** page. They can use **Find local services** or enter an API URL and key; Transly loads available model names for selection.
+6. Report completed checks, remaining manual steps, and whether any model request ran.
 
-Translation quality is the primary product requirement. Preserve meaning,
-voice, terminology, links, and the document structure needed to render a clear
-translation.
+## Working On Transly
 
-Do not add unrelated translation workflows unless the requested scope changes.
+- Translation quality is the primary product requirement. Preserve meaning, voice, terminology, links, and document structure.
+- Transly owns the browser translation experience: extraction, batching, prompts, validation, caching, and rendering. It does not own model hosting, provider authentication, billing, or proxy operation.
+- API keys stay in Chrome local extension storage and must never enter webpage code, logs, traces, or synced storage.
+- Remote API URLs must use HTTPS. Plain HTTP is allowed only for localhost.
+- Local discovery must remain user-triggered, limited to fixed loopback endpoints, and must not send stored credentials while probing.
+- Read `docs/architecture.md`, relevant source, and tests before changing behavior.
+- Preserve unrelated worktree changes and update focused documentation when behavior changes.
 
-## Installing Transly For A User
-
-When the user asks to install or set up Transly:
-
-1. Work autonomously. Only pause when the user must complete an interactive
-   browser login or load the unpacked extension in Chrome.
-2. Use the current checkout when it is Transly. Otherwise clone the repository
-   into a `transly` folder in the current workspace without asking where to put
-   it. Reuse that folder when it already contains a Transly checkout. If the
-   name is occupied by unrelated files, use `transly-install` and continue.
-3. Enter the repository, read the Install Transly section in `README.md`, and
-   inspect the worktree before taking further action.
-4. Do not edit product source as part of a normal installation.
-5. Run `codex login status`. If Codex is not logged in with ChatGPT, run
-   `codex login` yourself in an interactive terminal, keep the command active
-   while the user completes the browser authorization, and continue
-   automatically when it succeeds. Do not merely tell the user to run the
-   command.
-6. Run `npm install`, then `npm run setup`. Let the command report missing
-   macOS, Chrome, or Node.js requirements instead of guessing.
-7. Run `npm test` after setup. Do not run `native:smoke` or any other real model
-   request without explicit user approval because it consumes subscription
-   capacity.
-8. Do not install the extension through browser automation. Return the
-   repository root's exact absolute path and ask the user to open
-   `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and
-   select that folder.
-9. Report completed checks, manual steps, and whether any model request ran.
-
-## Sources Of Truth
-
-Start with:
-
-- `README.md` for installation, usage, and commands.
-- `docs/architecture.md` for components, trust boundaries, and request flow.
-- `docs/site-rules.md` for article discovery and extraction behavior.
-- The relevant source and tests for current implementation details.
-
-Code and tests are authoritative. When behavior changes, update the focused
-document that owns it instead of copying the new details into this file.
-
-## Durable Boundaries
-
-- Codex and ChatGPT credentials stay inside the Native Host. Browser extension
-  code must never read or receive them.
-- Chrome Native Messaging is the browser-to-host transport. Do not expose model
-  access through a localhost HTTP server.
-- Langfuse is optional. Translation must work when it is absent or
-  misconfigured, and credentials must never appear in traces or logs.
-- Transly is an independent implementation. Do not commit extracted proprietary
-  extension bundles, source, assets, branding, or text.
-- Preserve unrelated user changes in the worktree.
-
-## Working On A Change
-
-1. Read the relevant code, tests, and focused documentation before editing.
-2. Make the smallest cohesive change that solves the requested behavior.
-3. Add or update tests in proportion to the risk.
-4. Update the owning documentation when architecture or user behavior changes.
-5. Report whether verification used a real model request, since it consumes the
-   user's subscription capacity.
-
-Useful checks:
-
-```bash
-npm test
-npm run preflight
-npm run native:doctor
-npm run logs -- --limit 80
-git diff --check
-```
-
-See `README.md` for setup, smoke tests, and the complete command list.
-
-## Definition Of Done
-
-A change is complete when the requested path works through the real extension,
-relevant tests pass, security and translation quality have not regressed, and
-the documentation still matches user-visible behavior.
+Run `npm test` and `git diff --check` before finishing. State clearly whether verification used a real model request.

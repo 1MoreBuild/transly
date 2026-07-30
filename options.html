@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Transly settings</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main class="settings-shell">
+      <header class="settings-header">
+        <p class="eyebrow">Transly</p>
+        <h1>Translation service</h1>
+        <p>Connect an OpenAI-compatible API. Transly sends article text directly from this browser.</p>
+      </header>
+
+      <section class="quick-setup" aria-labelledby="quickSetupHeading">
+        <div class="section-heading">
+          <div>
+            <h2 id="quickSetupHeading">Quick setup</h2>
+            <p>Find a service already running on this computer, or start with the OpenAI API.</p>
+          </div>
+        </div>
+
+        <div class="quick-actions">
+          <button id="connectLane" class="setup-action setup-action-primary" type="button">
+            <strong>Connect Lane</strong>
+            <span>Use your local AI providers automatically</span>
+          </button>
+          <button id="discoverLocal" class="setup-action" type="button">
+            <strong>Find other local services</strong>
+            <span>Check common OpenAI-compatible ports</span>
+          </button>
+          <button id="useOpenAI" class="setup-action" type="button">
+            <strong>Use OpenAI API</strong>
+            <span>Fill the official API endpoint</span>
+          </button>
+        </div>
+
+        <div id="discoveryPanel" class="discovery-panel" hidden>
+          <div class="discovery-heading">
+            <strong>Local services</strong>
+            <span id="discoveryStatus" role="status" aria-live="polite"></span>
+          </div>
+          <div id="localResults" class="local-results"></div>
+        </div>
+      </section>
+
+      <form id="providerForm" class="provider-form">
+        <label class="field" for="apiUrl">
+          <span>API URL</span>
+          <input id="apiUrl" name="apiUrl" type="url" spellcheck="false" autocomplete="url" placeholder="https://api.openai.com/v1" required>
+          <small>Enter a base URL or a complete Responses or Chat Completions endpoint.</small>
+        </label>
+
+        <label class="field" for="apiKey">
+          <span>API key</span>
+          <span class="password-input">
+            <input id="apiKey" name="apiKey" type="password" spellcheck="false" autocomplete="off" placeholder="Optional">
+            <button id="toggleApiKey" type="button" aria-label="Show API key">Show</button>
+          </span>
+          <small>Leave empty only when the service requires no key. Stored in Chrome local storage.</small>
+        </label>
+
+        <div class="field">
+          <label for="model">Model</label>
+          <div class="model-input-row">
+            <select id="model" name="model" disabled>
+              <option value="">Connect to load available models</option>
+            </select>
+            <button id="loadModels" class="inline-action" type="button">Load models</button>
+          </div>
+          <input id="customModel" class="custom-model" type="text" spellcheck="false" autocomplete="off" placeholder="Provider model name" hidden>
+          <small id="modelHint">Connect to a service to choose from its available models.</small>
+        </div>
+
+        <details class="advanced-settings">
+          <summary>Advanced</summary>
+          <label class="field compact" for="protocol">
+            <span>API format</span>
+            <select id="protocol" name="protocol">
+              <option value="auto">Auto detect</option>
+              <option value="responses">Responses API</option>
+              <option value="chat-completions">Chat Completions</option>
+            </select>
+          </label>
+        </details>
+
+        <div class="form-footer">
+          <p id="providerStatus" class="provider-status" role="status" aria-live="polite"></p>
+          <div class="form-actions">
+            <button id="saveWithoutTest" class="secondary-action" type="button" hidden>Save without testing</button>
+            <button id="connectProvider" class="primary-action" type="submit">Connect</button>
+          </div>
+        </div>
+      </form>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

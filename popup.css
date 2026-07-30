@@ -207,6 +207,21 @@ label.language-control {
   gap: 3px;
 }
 
+.engine-row > div:first-child {
+  flex: 1;
+}
+
+#providerValue {
+  overflow: hidden;
+  max-width: 150px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.engine-actions {
+  align-items: flex-end;
+}
+
 .engine-row strong {
   font-size: 13px;
   font-weight: 650;
@@ -222,6 +237,23 @@ label.language-control {
   font: 600 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.configure-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.configure-action:hover,
+.configure-action:focus-visible {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .primary-action-section {

@@ -58,7 +58,7 @@ Implemented local rendering now follows the Immersive Translate shape more close
 - Loading uses the same wrapper location as the final translation and is replaced in place.
 - Default visual style copies a safe typography subset from the source block at full opacity instead of applying a fixed translation color.
 - Links and protected inline elements such as `code`, `kbd`, `math`, `svg`, `img`, `sub`, `sup`, and explicit no-translate nodes are replaced with `[[TRANSLY_PH_n]]` placeholders before translation.
-- The bridge prompt tells the model to preserve placeholder tokens exactly.
+- The extension prompt tells the model to preserve placeholder tokens exactly.
 - The content script rehydrates links with their original destination and computed link style, and restores protected inline nodes from local DOM clones.
 
 This is still simpler than Immersive Translate rich translation. It does not yet preserve arbitrary emphasis structure or map translated text back into original inline DOM spans.
@@ -83,19 +83,24 @@ Implication for this project:
 - Keep a small rule object per site.
 - Use cue arrays as the stable internal data model.
 
-## Local Codex Bridge
-
-Machine state:
-
-- `codex` is resolved from the user's `PATH`.
-- `codex doctor` must report ChatGPT token auth is configured.
-- `openclaw` is not part of this project. A stale local wrapper was removed because it pointed to a deleted app.
+## Provider Boundary
 
 Decision:
 
-- Use the same ChatGPT/Codex OAuth credential shape that OpenClaw uses, but call ChatGPT's Codex Responses endpoint directly.
-- Keep the provider abstraction focused on Codex-backed local auth. The implementation does not depend on OpenClaw or its binary.
-- Use Chrome Native Messaging for the local extension-to-provider boundary; do not expose an HTTP bridge.
+- Keep Transly focused on translation extraction, prompting, validation, caching, and rendering.
+- Accept a user-configured OpenAI-compatible API URL, optional API key, model, and protocol instead of implementing model authentication.
+- Let hosted APIs or separately operated local proxies own upstream authentication and provider compatibility.
+- Send requests from the extension service worker. Restrict remote endpoints to HTTPS and allow plain HTTP only for loopback addresses.
+
+## Optional Gateway Compatibility
+
+Compatibility check date: 2026-07-16.
+
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) `7.2.80` successfully served model discovery and a streaming Responses request to Transly during a local test. This is compatibility evidence, not a dependency or preferred product identity. Transly should continue to treat it like any other user-operated OpenAI-compatible gateway.
+
+One tested gateway returned an SSE stream with an `application/json` Content-Type. The provider client therefore detects streaming responses from both headers and body prefixes. Keep that regression test when changing the transport parser.
+
+Gateway installation, authentication, credentials, process management, upstream terms, and availability are outside Transly's ownership. Product documentation should explain the standard provider contract rather than prescribe a particular gateway.
 
 ## Local Snapshot Boundary
 
