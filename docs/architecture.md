@@ -61,6 +61,26 @@ Subtitle translation uses the same request queue and validation path with subtit
 
 Validated translation and audit results are cached in Chrome Cache Storage for 30 days. The cache identity includes the configured provider URL, protocol, model, client content key, and effective prompt. API keys are never included. An in-memory map deduplicates identical requests while the service worker remains alive.
 
+## Product Baseline
+
+Playwright loads the real unpacked Manifest V3 extension in its bundled
+Chromium and drives the settings page, popup, service worker, content scripts,
+and translated DOM as a user would. A deterministic loopback provider supplies
+model discovery and streamed Responses output without making a real model
+request.
+
+The required E2E journeys cover:
+
+- first-time provider configuration and model discovery;
+- progressive article translation, link preservation, reading mode, spacing,
+  and clearing;
+- model switching and persistence across a browser restart;
+- visible provider failure and retry recovery.
+
+CI and Chrome Web Store packaging must pass these E2E journeys. Unit tests
+remain useful for parser and DOM helper edge cases, but they are not the product
+release gate by themselves.
+
 ## Trust Boundary
 
 Page scripts cannot access extension local storage or call the provider directly. The API key is attached only by the service worker as a Bearer token. The provider necessarily receives the text being translated, so users should configure only services they trust.

@@ -63,11 +63,37 @@
         </label>
 
         <div class="field">
-          <label for="model">Model</label>
+          <label id="modelLabel" for="modelTrigger">Model</label>
           <div class="model-input-row">
-            <select id="model" name="model" disabled>
-              <option value="">Connect to load available models</option>
-            </select>
+            <div id="modelPicker" class="model-picker" data-disabled="true">
+              <button
+                id="modelTrigger"
+                class="model-trigger"
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-controls="modelPopover"
+                disabled
+              >
+                <span id="modelValue" class="model-value is-placeholder">Connect to load available models</span>
+                <span class="model-caret" aria-hidden="true"></span>
+              </button>
+              <div id="modelPopover" class="model-popover" hidden>
+                <div class="model-search">
+                  <input
+                    id="modelSearch"
+                    type="search"
+                    spellcheck="false"
+                    autocomplete="off"
+                    aria-label="Search available models"
+                    placeholder="Search models"
+                  >
+                </div>
+                <div id="modelList" class="model-list" role="listbox" aria-labelledby="modelLabel"></div>
+                <button id="manualModel" class="model-manual" type="button">Enter a model name manually…</button>
+              </div>
+              <input id="model" name="model" type="hidden">
+            </div>
             <button id="loadModels" class="inline-action" type="button">Load models</button>
           </div>
           <input id="customModel" class="custom-model" type="text" spellcheck="false" autocomplete="off" placeholder="Provider model name" hidden>

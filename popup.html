@@ -44,14 +44,35 @@
       </section>
 
       <section class="engine-row" aria-label="Translation engine">
-        <div>
-          <span class="section-kicker">Translation engine</span>
-          <strong id="providerValue">Custom API</strong>
+        <div id="providerMark" class="provider-mark" role="img" aria-label="AI provider">
+          <img id="providerIcon" alt="" hidden>
+          <span id="providerFallback" aria-hidden="true">AI</span>
         </div>
-        <div class="engine-actions">
-          <span id="modelValue" class="model-value">Checking…</span>
-          <button id="configureProvider" class="configure-action" type="button">Configure</button>
+        <div class="engine-copy">
+          <span id="providerValue" class="section-kicker">AI provider</span>
+          <div id="popupModelPicker" class="popup-model-picker">
+            <button
+              id="popupModelTrigger"
+              class="popup-model-trigger"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+              aria-controls="popupModelList"
+              disabled
+            >
+              <strong id="modelValue">Checking…</strong>
+              <span class="popup-model-caret" aria-hidden="true"></span>
+            </button>
+            <div id="popupModelPopover" class="popup-model-popover" hidden>
+              <div id="popupModelList" class="popup-model-list" role="listbox" aria-label="Available models"></div>
+            </div>
+          </div>
         </div>
+        <button id="configureProvider" class="configure-action" type="button" aria-label="Configure translation service" title="Configure translation service">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M1 14h6M9 8h6m2 8h6"/>
+          </svg>
+        </button>
       </section>
 
       <section class="primary-action-section">

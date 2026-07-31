@@ -10,6 +10,11 @@
   },
   "scripts": {
     "package": "node tools/package-extension.mjs",
-    "test": "node --test src/*.test.mjs src/content/*.test.mjs src/provider/*.test.mjs"
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "node --test src/*.test.mjs src/content/*.test.mjs src/provider/*.test.mjs",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
   }
 }

@@ -10,6 +10,7 @@ const stagingDir = path.join(distDir, ".extension-package");
 const outputPath = path.join(distDir, `transly-${manifest.version}.zip`);
 const rootFiles = [
   "LICENSE",
+  "THIRD_PARTY_NOTICES.md",
   "manifest.json",
   "popup.css",
   "popup.html",
@@ -34,6 +35,7 @@ try {
     `${JSON.stringify(storeManifest, null, 2)}\n`
   );
   await cp(path.join(projectRoot, "assets", "icons"), path.join(stagingDir, "assets", "icons"), { recursive: true });
+  await cp(path.join(projectRoot, "assets", "providers"), path.join(stagingDir, "assets", "providers"), { recursive: true });
   await cp(path.join(projectRoot, "src"), path.join(stagingDir, "src"), {
     recursive: true,
     filter(source) {

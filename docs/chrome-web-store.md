@@ -194,7 +194,9 @@ Release flow:
 
 1. Bump `manifest.json` and `package.json` to the same version.
 2. Push a matching tag such as `v0.1.0`.
-3. The workflow tests, packages, and uploads the draft.
+3. The workflow installs Chromium, runs unit tests and real-extension E2E
+   journeys against a deterministic local provider, then packages and uploads
+   the draft.
 4. Manually run **Chrome Web Store Release** with mode `submit`.
 5. Approve the protected environment. The workflow submits a staged publish for
    review.

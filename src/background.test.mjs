@@ -235,6 +235,83 @@ test("provider status automatically connects Lane only when no provider is confi
   assert.equal(first.data.apiKey, undefined);
 });
 
+test("popup can list and switch configured models without reading the API key", async (t) => {
+  let runtimeListener;
+  let stored = {
+    apiUrl: "http://127.0.0.1:3210/v1",
+    apiKey: "lane-secret",
+    model: "openai-codex/gpt-5.6-sol",
+    protocol: "responses"
+  };
+  let listedConfig;
+  const chrome = {
+    runtime: {
+      id: "transly-test",
+      lastError: null,
+      getURL(path) {
+        return `chrome-extension://transly-test/${path}`;
+      },
+      onMessage: {
+        addListener(listener) {
+          runtimeListener = listener;
+        }
+      }
+    },
+    storage: {
+      local: {
+        setAccessLevel() {
+          return Promise.resolve();
+        },
+        get(_defaults, callback) {
+          callback({ translationProvider: stored });
+        },
+        set(value, callback) {
+          stored = value.translationProvider;
+          callback();
+        }
+      },
+      sync: {}
+    },
+    tabs: {}
+  };
+  globalThis.chrome = chrome;
+  t.after(() => delete globalThis.chrome);
+  registerBackground(chrome, {
+    listProviderModels: async (config) => {
+      listedConfig = config;
+      return {
+        models: [
+          "openai-codex/gpt-5.6-sol",
+          "openai-codex/gpt-5.6-luna"
+        ]
+      };
+    }
+  });
+  const sender = {
+    id: "transly-test",
+    url: "chrome-extension://transly-test/popup.html"
+  };
+
+  const listed = await dispatch(runtimeListener, {
+    type: "TRANSLY_LIST_CONFIGURED_MODELS"
+  }, sender);
+  assert.equal(listedConfig.apiKey, "lane-secret");
+  assert.equal(listed.data.apiKey, undefined);
+  assert.equal(listed.data.summary.apiKey, undefined);
+  assert.deepEqual(listed.data.models, [
+    "openai-codex/gpt-5.6-sol",
+    "openai-codex/gpt-5.6-luna"
+  ]);
+
+  const selected = await dispatch(runtimeListener, {
+    type: "TRANSLY_SELECT_PROVIDER_MODEL",
+    model: "openai-codex/gpt-5.6-luna"
+  }, sender);
+  assert.equal(selected.data.model, "openai-codex/gpt-5.6-luna");
+  assert.equal(stored.model, "openai-codex/gpt-5.6-luna");
+  assert.equal(stored.apiKey, "lane-secret");
+});
+
 function dispatch(listener, message, sender) {
   return new Promise((resolve) => {
     assert.equal(listener(message, sender, resolve), true);

@@ -7,7 +7,7 @@ Transly is a Chrome extension for context-aware AI translation through a user-co
 When asked to install Transly:
 
 1. Reuse the current checkout if it is Transly. Otherwise clone the repository into a `transly` folder in the current workspace without asking where to put it. Use `transly-install` only if that name contains unrelated files.
-2. Read `README.md`, inspect the worktree, and run `npm test`. Do not modify product source during a normal installation.
+2. Read `README.md`, inspect the worktree, install dependencies, run `npx playwright install chromium`, then run `npm test`. Do not modify product source during a normal installation.
 3. Do not send a real model request without explicit approval.
 4. Browser automation cannot reliably complete Chrome's **Load unpacked** flow. Return the repository root's exact absolute path and ask the user to open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select that folder.
 5. Ask the user to open Transly's **Configure** page. They can use **Find local services** or enter an API URL and key; Transly loads available model names for selection.
@@ -23,4 +23,4 @@ When asked to install Transly:
 - Read `docs/architecture.md`, relevant source, and tests before changing behavior.
 - Preserve unrelated worktree changes and update focused documentation when behavior changes.
 
-Run `npm test` and `git diff --check` before finishing. State clearly whether verification used a real model request.
+Run `npm test`, `npm run package`, and `git diff --check` before finishing. The E2E suite must load the real unpacked extension and exercise user journeys against its deterministic local provider. State clearly whether verification used a real model request.

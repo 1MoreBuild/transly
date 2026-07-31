@@ -1195,18 +1195,26 @@ function attachTranslationPresentation(source, node) {
     return;
   }
 
-  const fallbackGap = Math.min(16, Math.max(8, sourceFontSize * 0.34));
-  node.style.marginTop = sourceMarginBottom >= sourceFontSize * 0.35 ? "0px" : `${fallbackGap}px`;
-  if (sourceMarginBottom > 0) node.style.marginBottom = `${sourceMarginBottom}px`;
+  const placement = globalThis.TranslyArticlePlacement;
+  if (placement?.isTableCell(source) || placement?.isGridItem(source)) {
+    const embeddedGap = Math.min(10, Math.max(5, sourceFontSize * 0.24));
+    node.style.marginTop = `${embeddedGap}px`;
+    node.style.marginBottom = "0px";
+    return;
+  }
+
+  if (globalThis.TranslyArticleSpacing) {
+    globalThis.TranslyArticleSpacing.group(source, node, style);
+    return;
+  }
+
+  const fallbackGap = Math.min(10, Math.max(5, sourceFontSize * 0.24));
+  node.style.marginTop = `${fallbackGap}px`;
+  node.style.marginBottom = `${sourceMarginBottom || fallbackGap * 2}px`;
 }
 
 function restoreTranslationSpacing(source) {
-  if (!source?.dataset?.translyOriginalMarginBottomPx) return;
-  const original = source.dataset.translyOriginalMarginBottomStyle || "";
-  if (original.trim()) source.style.marginBottom = original;
-  else source.style.removeProperty("margin-bottom");
-  delete source.dataset.translyOriginalMarginBottomStyle;
-  delete source.dataset.translyOriginalMarginBottomPx;
+  globalThis.TranslyArticleSpacing?.restore(source);
 }
 
 function appendTranslatedContent(container, item, text) {

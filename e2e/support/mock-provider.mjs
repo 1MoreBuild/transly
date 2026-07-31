@@ -1,0 +1,175 @@
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+
+const ARTICLE_HTML = await readFile(
+  new URL("../fixtures/article.html", import.meta.url),
+  "utf8"
+);
+const API_KEY = "transly-e2e-key";
+const MODELS = [
+  "openai/gpt-e2e-primary",
+  "openai/gpt-e2e-fast",
+  "openai/gpt-image-e2e"
+];
+
+export async function startMockProvider() {
+  const state = {
+    failNextTranslation: false,
+    streamDelayMs: 260,
+    requests: []
+  };
+
+  const server = createServer(async (request, response) => {
+    setCorsHeaders(response);
+    if (request.method === "OPTIONS") {
+      response.writeHead(204).end();
+      return;
+    }
+
+    const url = new URL(request.url || "/", "http://127.0.0.1");
+    if (request.method === "GET" && url.pathname === "/article.html") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(ARTICLE_HTML);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/health") {
+      respondJson(response, 200, { ok: true });
+      return;
+    }
+    if (url.pathname.startsWith("/v1/") && request.headers.authorization !== `Bearer ${API_KEY}`) {
+      respondJson(response, 401, { error: { message: "Missing or invalid API key" } });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/models") {
+      state.requests.push({ kind: "models", authorization: request.headers.authorization });
+      respondJson(response, 200, { data: MODELS.map((id) => ({ id })) });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/responses") {
+      const body = JSON.parse(await readRequestBody(request));
+      const instructions = String(body.instructions || "");
+      const prompt = String(body.input?.[0]?.content?.[0]?.text || "");
+      const kind = instructions.includes("webpage translation QA planner") ? "audit" : "translation";
+      state.requests.push({
+        kind,
+        model: body.model,
+        authorization: request.headers.authorization,
+        instructions,
+        prompt
+      });
+
+      if (kind === "translation" && state.failNextTranslation) {
+        state.failNextTranslation = false;
+        respondJson(response, 503, { error: { message: "Planned provider outage" } });
+        return;
+      }
+
+      const output = kind === "audit"
+        ? JSON.stringify({ actions: [], notes: [] })
+        : JSON.stringify(extractPassages(prompt).map(translatePassage));
+      await streamResponse(response, output, kind === "translation" ? state.streamDelayMs : 0);
+      return;
+    }
+
+    respondJson(response, 404, { error: { message: "Not found" } });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  const origin = `http://127.0.0.1:${address.port}`;
+
+  return {
+    apiKey: API_KEY,
+    apiUrl: `${origin}/v1`,
+    articleUrl: `${origin}/article.html`,
+    models: MODELS.slice(),
+    state,
+    translationRequests() {
+      return state.requests.filter((request) => request.kind === "translation");
+    },
+    auditRequests() {
+      return state.requests.filter((request) => request.kind === "audit");
+    },
+    async close() {
+      server.closeAllConnections?.();
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  };
+}
+
+function setCorsHeaders(response) {
+  response.setHeader("access-control-allow-origin", "*");
+  response.setHeader("access-control-allow-headers", "authorization, content-type");
+  response.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+}
+
+function respondJson(response, status, body) {
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(body));
+}
+
+async function streamResponse(response, output, delayMs) {
+  response.writeHead(200, {
+    "cache-control": "no-cache",
+    "content-type": "text/event-stream; charset=utf-8"
+  });
+
+  const chunks = splitJsonOutput(output);
+  for (const chunk of chunks) {
+    response.write(`data: ${JSON.stringify({
+      type: "response.output_text.delta",
+      delta: chunk
+    })}\n\n`);
+    if (delayMs) await delay(delayMs);
+  }
+  response.write("data: [DONE]\n\n");
+  response.end();
+}
+
+function splitJsonOutput(output) {
+  if (!output.startsWith("[")) return [output];
+  const values = JSON.parse(output);
+  if (!Array.isArray(values) || values.length < 2) return [output];
+  return values.map((value, index) => (
+    `${index === 0 ? "[" : ""}${index ? "," : ""}${JSON.stringify(value)}${index === values.length - 1 ? "]" : ""}`
+  ));
+}
+
+function extractPassages(prompt) {
+  const source = prompt.split("TEXT TO TRANSLATE\n").at(-1) || "";
+  const marker = source.match(/<<<TRANSLY_PASSAGE_BREAK(?:_)*>>>/)?.[0];
+  return marker
+    ? source.split(marker).map((passage) => passage.trim()).filter(Boolean)
+    : [source.trim()].filter(Boolean);
+}
+
+function translatePassage(source, index) {
+  const placeholders = source.match(/\[\[TRANSLY_PH_\d+]]/g) || [];
+  const translations = [
+    "上下文让翻译更准确",
+    "孤立来看，产品名称可能只有一种含义；放进完整文章后，它往往会变得更精确。",
+    "读者在阅读自然流畅的译文时，也应保留原始引用。",
+    "模型完成一段后，就应展示完整的译文。",
+    "请求失败后，应当可以直接重试，无需重新加载扩展。"
+  ];
+  return [translations[index] || `第 ${index + 1} 段译文`, ...placeholders].join(" ");
+}
+
+function readRequestBody(request) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => resolve(body));
+    request.on("error", reject);
+  });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

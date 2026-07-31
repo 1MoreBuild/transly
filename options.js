@@ -2,6 +2,13 @@ const form = document.querySelector("#providerForm");
 const apiUrl = document.querySelector("#apiUrl");
 const apiKey = document.querySelector("#apiKey");
 const model = document.querySelector("#model");
+const modelPicker = document.querySelector("#modelPicker");
+const modelTrigger = document.querySelector("#modelTrigger");
+const modelValue = document.querySelector("#modelValue");
+const modelPopover = document.querySelector("#modelPopover");
+const modelSearch = document.querySelector("#modelSearch");
+const modelList = document.querySelector("#modelList");
+const manualModel = document.querySelector("#manualModel");
 const customModel = document.querySelector("#customModel");
 const modelHint = document.querySelector("#modelHint");
 const protocol = document.querySelector("#protocol");
@@ -20,6 +27,8 @@ const status = document.querySelector("#providerStatus");
 let availableModels = [];
 let savedConfiguration = false;
 let savedModel = "";
+let filteredModels = [];
+let activeModelIndex = -1;
 
 initialize();
 
@@ -64,7 +73,7 @@ form.addEventListener("submit", async (event) => {
   if (!selectedModel()) {
     setBusy(false);
     showStatus("No model was listed. Enter the model name, then connect again.", "error");
-    model.focus();
+    focusModelControl();
     return;
   }
 
@@ -105,7 +114,7 @@ saveWithoutTest.addEventListener("click", async () => {
   if (!apiUrl.reportValidity()) return;
   if (!selectedModel()) {
     showStatus("Enter a model name before saving.", "error");
-    model.focus();
+    focusModelControl();
     return;
   }
   setBusy(true);
@@ -206,7 +215,7 @@ function chooseLocalResult(result) {
     apiKey.focus();
   } else {
     showStatus("Local service selected. Confirm the model, then connect.", "success");
-    model.focus();
+    focusModelControl();
   }
   form.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -250,25 +259,15 @@ function updateModelChoices(models) {
   availableModels = [...new Set(models.map((value) => String(value).trim()).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
   const current = selectedModel() || savedModel;
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = availableModels.length ? "Choose a model" : "No model list available";
-  const options = availableModels.map((value) => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = value;
-    return option;
-  });
-  const custom = document.createElement("option");
-  custom.value = "__custom__";
-  custom.textContent = "Enter a model name manually…";
-  model.replaceChildren(placeholder, ...options, custom);
-  model.disabled = false;
+  setModelPickerDisabled(false);
   if (current && availableModels.includes(current)) {
     selectModel(current);
   } else if (current) {
     selectModel(current);
+  } else {
+    selectModel("");
   }
+  renderModelChoices();
   modelHint.textContent = availableModels.length
     ? `${availableModels.length} available model${availableModels.length === 1 ? "" : "s"}. Choose one from the list.`
     : "No model list is available. Choose the manual option and enter the provider model name.";
@@ -276,8 +275,12 @@ function updateModelChoices(models) {
 
 function resetModelChoices() {
   availableModels = [];
-  model.replaceChildren(new Option("Connect to load available models", ""));
-  model.disabled = true;
+  filteredModels = [];
+  model.value = "";
+  setModelPickerDisabled(true);
+  closeModelPicker();
+  setModelTriggerValue("Connect to load available models", true);
+  modelList.replaceChildren();
   customModel.hidden = true;
   customModel.value = "";
   modelHint.textContent = "Load models to choose from those available to this service.";
@@ -285,13 +288,12 @@ function resetModelChoices() {
 }
 
 function enableManualModelEntry() {
-  if (!model.querySelector('option[value="__custom__"]')) {
-    const custom = new Option("Enter a model name manually…", "__custom__");
-    model.append(custom);
-  }
-  model.disabled = false;
+  setModelPickerDisabled(false);
   model.value = "__custom__";
   customModel.hidden = false;
+  setModelTriggerValue(customModel.value || "Custom model", !customModel.value);
+  closeModelPicker();
+  customModel.focus();
 }
 
 function chooseDefaultModel(models) {
@@ -299,39 +301,184 @@ function chooseDefaultModel(models) {
   return models.find((name) => !nonTextPattern.test(name)) || models[0] || "";
 }
 
-model.addEventListener("change", () => {
-  const custom = model.value === "__custom__";
-  customModel.hidden = !custom;
-  if (custom) customModel.focus();
-});
-
 function showSavedModel(value) {
   if (!value) return;
-  const option = new Option(value, value, true, true);
-  model.replaceChildren(option);
-  model.disabled = false;
+  availableModels = [value];
+  setModelPickerDisabled(false);
+  selectModel(value);
+  renderModelChoices();
 }
 
 function selectModel(value) {
   if (!value) {
     model.value = "";
     customModel.hidden = true;
+    customModel.value = "";
+    setModelTriggerValue(availableModels.length ? "Choose a model" : "No model list available", true);
+    renderModelChoices(modelSearch.value);
     return;
   }
   if (availableModels.includes(value)) {
     model.value = value;
     customModel.hidden = true;
     customModel.value = "";
+    setModelTriggerValue(value);
+    renderModelChoices(modelSearch.value);
+    closeModelPicker();
     return;
   }
   model.value = "__custom__";
   customModel.hidden = false;
   customModel.value = value;
+  setModelTriggerValue(value);
+  renderModelChoices(modelSearch.value);
+  closeModelPicker();
 }
 
 function selectedModel() {
   return model.value === "__custom__" ? customModel.value.trim() : model.value.trim();
 }
+
+function setModelPickerDisabled(disabled) {
+  modelPicker.dataset.disabled = String(disabled);
+  modelTrigger.disabled = disabled;
+}
+
+function setModelTriggerValue(value, placeholder = false) {
+  modelValue.textContent = value;
+  modelValue.title = placeholder ? "" : value;
+  modelValue.classList.toggle("is-placeholder", placeholder);
+}
+
+function openModelPicker() {
+  if (modelTrigger.disabled) return;
+  modelPopover.hidden = false;
+  modelTrigger.setAttribute("aria-expanded", "true");
+  modelSearch.value = "";
+  renderModelChoices();
+  requestAnimationFrame(() => modelSearch.focus());
+}
+
+function closeModelPicker({ restoreFocus = false } = {}) {
+  modelPopover.hidden = true;
+  modelTrigger.setAttribute("aria-expanded", "false");
+  activeModelIndex = -1;
+  if (restoreFocus) modelTrigger.focus();
+}
+
+function renderModelChoices(filter = "") {
+  const query = filter.trim().toLocaleLowerCase();
+  filteredModels = availableModels.filter((value) => value.toLocaleLowerCase().includes(query));
+  modelList.replaceChildren();
+  activeModelIndex = filteredModels.length ? 0 : -1;
+
+  if (!filteredModels.length) {
+    const empty = document.createElement("p");
+    empty.className = "model-empty";
+    empty.textContent = availableModels.length ? "No matching models" : "No models returned";
+    modelList.append(empty);
+    return;
+  }
+
+  filteredModels.forEach((value, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "model-option";
+    button.dataset.value = value;
+    button.dataset.active = String(index === activeModelIndex);
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", String(selectedModel() === value));
+
+    const copy = document.createElement("span");
+    copy.className = "model-option-copy";
+    const name = document.createElement("span");
+    name.className = "model-option-name";
+    const provider = document.createElement("span");
+    provider.className = "model-option-provider";
+    const parts = splitModelName(value);
+    name.textContent = parts.name;
+    provider.textContent = parts.provider;
+    provider.hidden = !parts.provider;
+    copy.append(name, provider);
+
+    const check = document.createElement("span");
+    check.className = "model-option-check";
+    check.setAttribute("aria-hidden", "true");
+    check.textContent = selectedModel() === value ? "✓" : "";
+    button.append(copy, check);
+    button.addEventListener("pointermove", () => setActiveModelIndex(index));
+    button.addEventListener("click", () => {
+      selectModel(value);
+      modelTrigger.focus();
+    });
+    modelList.append(button);
+  });
+}
+
+function splitModelName(value) {
+  const separator = value.indexOf("/");
+  if (separator < 1 || separator === value.length - 1) return { name: value, provider: "" };
+  return {
+    name: value.slice(separator + 1),
+    provider: value.slice(0, separator)
+  };
+}
+
+function setActiveModelIndex(index) {
+  if (!filteredModels.length) return;
+  activeModelIndex = Math.max(0, Math.min(filteredModels.length - 1, index));
+  [...modelList.querySelectorAll(".model-option")].forEach((option, optionIndex) => {
+    option.dataset.active = String(optionIndex === activeModelIndex);
+  });
+}
+
+function moveActiveModel(delta) {
+  if (!filteredModels.length) return;
+  const next = activeModelIndex < 0
+    ? 0
+    : (activeModelIndex + delta + filteredModels.length) % filteredModels.length;
+  setActiveModelIndex(next);
+  modelList.querySelectorAll(".model-option")[next]?.scrollIntoView({ block: "nearest" });
+}
+
+function focusModelControl() {
+  if (!customModel.hidden) customModel.focus();
+  else modelTrigger.focus();
+}
+
+modelTrigger.addEventListener("click", () => {
+  if (modelPopover.hidden) openModelPicker();
+  else closeModelPicker();
+});
+
+modelSearch.addEventListener("input", () => renderModelChoices(modelSearch.value));
+modelSearch.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    moveActiveModel(event.key === "ArrowDown" ? 1 : -1);
+  } else if (event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    setActiveModelIndex(event.key === "Home" ? 0 : filteredModels.length - 1);
+  } else if (event.key === "Enter" && activeModelIndex >= 0) {
+    event.preventDefault();
+    selectModel(filteredModels[activeModelIndex]);
+    modelTrigger.focus();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeModelPicker({ restoreFocus: true });
+  }
+});
+
+manualModel.addEventListener("click", enableManualModelEntry);
+customModel.addEventListener("input", () => {
+  if (model.value === "__custom__") {
+    setModelTriggerValue(customModel.value.trim() || "Custom model", !customModel.value.trim());
+  }
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (!modelPopover.hidden && !modelPicker.contains(event.target)) closeModelPicker();
+});
 
 async function saveConfiguration({ verified }) {
   showStatus(verified ? "Saving translation service…" : "Saving without connection verification…");

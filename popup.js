@@ -3,7 +3,13 @@ const statusEl = document.querySelector("#status");
 const connectionBadge = document.querySelector("#connectionBadge");
 const connectionLabel = document.querySelector("#connectionLabel");
 const providerValue = document.querySelector("#providerValue");
+const providerIcon = document.querySelector("#providerIcon");
+const providerFallback = document.querySelector("#providerFallback");
 const modelValue = document.querySelector("#modelValue");
+const popupModelPicker = document.querySelector("#popupModelPicker");
+const popupModelTrigger = document.querySelector("#popupModelTrigger");
+const popupModelPopover = document.querySelector("#popupModelPopover");
+const popupModelList = document.querySelector("#popupModelList");
 const configureProvider = document.querySelector("#configureProvider");
 const articleDisplayMode = document.querySelector("#articleDisplayMode");
 const translateArticle = document.querySelector("#translateArticle");
@@ -15,6 +21,8 @@ const popupParams = new URLSearchParams(location.search);
 const sourceTabId = Number(popupParams.get("tabId") || 0);
 let providerReady = false;
 let currentArticleStatus = "idle";
+let currentModel = "";
+let popupModelsLoaded = false;
 
 initialize();
 
@@ -29,10 +37,9 @@ async function loadProviderStatus() {
     providerReady = true;
     connectionBadge.dataset.state = "ready";
     connectionLabel.textContent = "Configured";
-    providerValue.textContent = response.data.host || "Custom API";
-    providerValue.title = response.data.host || "Custom API";
-    modelValue.textContent = model;
-    modelValue.title = model;
+    setProviderPresentation(response.data);
+    setCurrentModel(model);
+    popupModelTrigger.disabled = false;
     showStatus("Translation service is ready.", "ready");
     updateArticleState(currentArticleStatus);
     updateSubtitleState(subtitleToggle.checked);
@@ -42,14 +49,35 @@ async function loadProviderStatus() {
   providerReady = false;
   connectionBadge.dataset.state = "error";
   connectionLabel.textContent = "Setup required";
-  providerValue.textContent = "Custom API";
-  modelValue.textContent = "Not configured";
+  setProviderPresentation({});
+  setCurrentModel("Not configured");
+  popupModelTrigger.disabled = true;
   updateArticleState(currentArticleStatus);
   updateSubtitleState(subtitleToggle.checked);
   showStatus(response?.error || "Add an API URL, key, and model to begin.", "error");
 }
 
 configureProvider.addEventListener("click", () => chrome.runtime.openOptionsPage());
+popupModelTrigger.addEventListener("click", async () => {
+  if (!providerReady) return;
+  if (!popupModelPopover.hidden) {
+    closePopupModelPicker();
+    return;
+  }
+  openPopupModelPicker();
+  if (!popupModelsLoaded) await loadPopupModels();
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (!popupModelPopover.hidden && !popupModelPicker.contains(event.target)) closePopupModelPicker();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !popupModelPopover.hidden) {
+    closePopupModelPicker();
+    popupModelTrigger.focus();
+  }
+});
 
 async function loadSettings() {
   const response = await sendRuntimeMessage({ type: "TRANSLY_GET_SETTINGS" });
@@ -165,6 +193,136 @@ function setTargetLanguage(value) {
     targetLanguage.appendChild(option);
   }
   targetLanguage.value = value;
+}
+
+function setProviderPresentation(summary) {
+  const provider = summary?.provider || {};
+  providerValue.textContent = provider.name || "AI provider";
+  providerValue.title = provider.name || "AI provider";
+  if (provider.icon) {
+    providerIcon.src = chrome.runtime.getURL(provider.icon);
+    providerIcon.hidden = false;
+    providerFallback.hidden = true;
+  } else {
+    providerIcon.removeAttribute("src");
+    providerIcon.hidden = true;
+    providerFallback.hidden = false;
+  }
+}
+
+function setCurrentModel(value) {
+  currentModel = value;
+  modelValue.textContent = splitModelName(value).name || value;
+  modelValue.title = value;
+}
+
+function openPopupModelPicker() {
+  popupModelPopover.hidden = false;
+  popupModelTrigger.setAttribute("aria-expanded", "true");
+  if (!popupModelsLoaded) renderPopupModelMessage("Loading models…");
+}
+
+function closePopupModelPicker() {
+  popupModelPopover.hidden = true;
+  popupModelTrigger.setAttribute("aria-expanded", "false");
+}
+
+async function loadPopupModels() {
+  const response = await sendRuntimeMessage({ type: "TRANSLY_LIST_CONFIGURED_MODELS" });
+  if (!response?.ok) {
+    renderPopupModelMessage(response?.error || "Could not load models.");
+    return;
+  }
+  const models = filterTranslationModels(response.data.models || []);
+  popupModelsLoaded = true;
+  if (response.data.currentModel) setCurrentModel(response.data.currentModel);
+  renderPopupModels(models);
+}
+
+function filterTranslationModels(models) {
+  const unsupported = /(embedding|whisper|tts|speech|audio|image|dall-e|moderation|realtime|transcrib)/i;
+  return [...new Set(models.map((value) => String(value).trim()).filter(Boolean))]
+    .filter((value) => !unsupported.test(value))
+    .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+}
+
+function renderPopupModels(models) {
+  popupModelList.replaceChildren();
+  if (!models.length) {
+    renderPopupModelMessage("No text models available.");
+    return;
+  }
+  for (const value of models) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "popup-model-option";
+    button.dataset.value = value;
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", String(value === currentModel));
+
+    const copy = document.createElement("span");
+    copy.className = "popup-model-option-copy";
+    const name = document.createElement("span");
+    name.className = "popup-model-option-name";
+    const provider = document.createElement("span");
+    provider.className = "popup-model-option-provider";
+    const parts = splitModelName(value);
+    name.textContent = parts.name;
+    provider.textContent = parts.provider;
+    provider.hidden = !parts.provider;
+    copy.append(name, provider);
+
+    const check = document.createElement("span");
+    check.className = "popup-model-check";
+    check.setAttribute("aria-hidden", "true");
+    check.textContent = value === currentModel ? "✓" : "";
+    button.append(copy, check);
+    button.addEventListener("click", () => selectPopupModel(value, button));
+    popupModelList.append(button);
+  }
+}
+
+function renderPopupModelMessage(message) {
+  popupModelList.replaceChildren();
+  const copy = document.createElement("p");
+  copy.className = "popup-model-message";
+  copy.textContent = message;
+  popupModelList.append(copy);
+}
+
+async function selectPopupModel(value, button) {
+  if (value === currentModel) {
+    closePopupModelPicker();
+    return;
+  }
+  button.disabled = true;
+  const response = await sendRuntimeMessage({
+    type: "TRANSLY_SELECT_PROVIDER_MODEL",
+    model: value
+  });
+  button.disabled = false;
+  if (!response?.ok) {
+    showStatus(response?.error || "Could not switch models.", "error");
+    return;
+  }
+  setCurrentModel(value);
+  setProviderPresentation(response.data);
+  [...popupModelList.querySelectorAll(".popup-model-option")].forEach((option) => {
+    const selected = option.dataset.value === value;
+    option.setAttribute("aria-selected", String(selected));
+    option.querySelector(".popup-model-check").textContent = selected ? "✓" : "";
+  });
+  closePopupModelPicker();
+  showStatus(`Using ${splitModelName(value).name}.`, "ready");
+}
+
+function splitModelName(value) {
+  const separator = value.indexOf("/");
+  if (separator < 1 || separator === value.length - 1) return { name: value, provider: "" };
+  return {
+    name: value.slice(separator + 1),
+    provider: value.slice(0, separator)
+  };
 }
 
 function updateArticleState(status) {

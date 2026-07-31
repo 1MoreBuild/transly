@@ -96,11 +96,15 @@ and has not yet been measured in a published benchmark.
 Requires Node.js 20 or newer:
 
 ```bash
+npm install
+npx playwright install chromium
 npm test
 npm run package
 ```
 
-The tests do not send model requests. More documentation:
+`npm test` runs focused unit coverage and product-level Playwright E2E against
+the real unpacked extension. The E2E suite uses a local deterministic model
+service; it does not send real model requests. More documentation:
 
 - [Provider setup](docs/providers.md)
 - [Architecture](docs/architecture.md)

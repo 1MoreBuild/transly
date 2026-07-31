@@ -45,9 +45,28 @@ test("provider summary never returns the API key", () => {
     configured: true,
     host: "api.example.com",
     model: "model-a",
+    provider: {
+      id: "custom",
+      name: "AI provider",
+      icon: ""
+    },
     protocol: "auto"
   });
   assert.equal(JSON.stringify(summary).includes("do-not-return"), false);
+});
+
+test("provider summary identifies OpenAI models", () => {
+  const summary = providerSummary({
+    apiUrl: "http://127.0.0.1:3210/v1",
+    apiKey: "secret",
+    model: "openai-codex/gpt-5.6-sol",
+    protocol: "responses"
+  });
+  assert.deepEqual(summary.provider, {
+    id: "openai",
+    name: "OpenAI",
+    icon: "assets/providers/openai.svg"
+  });
 });
 
 test("provider summary treats a keyless loopback service as configured", () => {

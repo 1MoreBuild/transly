@@ -92,6 +92,40 @@ export function registerBackground(chromeApi, dependencies = {}) {
       return true;
     }
 
+    if (message?.type === "TRANSLY_LIST_CONFIGURED_MODELS") {
+      if (!isExtensionPage(chromeApi, sender)) return false;
+      readProviderConfig(chromeApi.storage.local)
+        .then(async (config) => {
+          const validConfig = validateProviderConfig(config);
+          const data = await listModels(validConfig);
+          return {
+            models: data.models || [],
+            currentModel: validConfig.model,
+            summary: providerSummary(validConfig)
+          };
+        })
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+      return true;
+    }
+
+    if (message?.type === "TRANSLY_SELECT_PROVIDER_MODEL") {
+      if (!isExtensionPage(chromeApi, sender)) return false;
+      const nextModel = String(message.model || "").trim();
+      if (!nextModel) {
+        sendResponse({ ok: false, error: "Model name is required." });
+        return false;
+      }
+      readProviderConfig(chromeApi.storage.local)
+        .then((config) => writeProviderConfig(chromeApi.storage.local, {
+          ...config,
+          model: nextModel
+        }))
+        .then((config) => sendResponse({ ok: true, data: providerSummary(config) }))
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+      return true;
+    }
+
     if (message?.type === "TRANSLY_DISCOVER_LOCAL_PROVIDERS") {
       if (!isOptionsPage(chromeApi, sender)) return false;
       Promise.resolve(discoverProviders())

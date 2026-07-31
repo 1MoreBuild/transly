@@ -59,8 +59,22 @@ export function providerSummary(configValue) {
     configured: Boolean(config.apiUrl && config.model),
     host,
     model: config.model,
+    provider: inferProvider(config),
     protocol: config.protocol
   };
+}
+
+function inferProvider(config) {
+  const modelPrefix = config.model.split("/", 1)[0].toLowerCase();
+  if (modelPrefix === "openai-codex" || modelPrefix === "openai") {
+    return { id: "openai", name: "OpenAI", icon: "assets/providers/openai.svg" };
+  }
+  try {
+    if (new URL(config.apiUrl).hostname === "api.openai.com") {
+      return { id: "openai", name: "OpenAI", icon: "assets/providers/openai.svg" };
+    }
+  } catch {}
+  return { id: "custom", name: "AI provider", icon: "" };
 }
 
 export function readProviderConfig(storageArea) {
