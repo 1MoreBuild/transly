@@ -27,9 +27,9 @@ jobs:
       CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
       CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
