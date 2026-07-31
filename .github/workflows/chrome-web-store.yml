@@ -1,0 +1,132 @@
+name: Chrome Web Store Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Upload a package or submit the uploaded draft for review
+        required: true
+        default: upload
+        type: choice
+        options:
+          - upload
+          - submit
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  upload:
+    if: github.event_name == 'push' || inputs.mode == 'upload'
+    runs-on: ubuntu-latest
+    env:
+      CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+      CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Validate release configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CWS_PUBLISHER_ID}"
+          test -n "${CWS_EXTENSION_ID}"
+          test -n "${{ vars.CWS_GCP_PROJECT_ID }}"
+          test -n "${{ vars.CWS_WORKLOAD_IDENTITY_PROVIDER }}"
+          test -n "${{ vars.CWS_SERVICE_ACCOUNT }}"
+
+      - name: Validate tag and package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          MANIFEST_VERSION="$(node -p "require('./manifest.json').version")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          MANIFEST_ID="$(node -e "const c=require('crypto');const m=require('./manifest.json');const h=c.createHash('sha256').update(Buffer.from(m.key,'base64')).digest().subarray(0,16);process.stdout.write([...h].map(b=>String.fromCharCode(97+(b>>4),97+(b&15))).join(''))")"
+          test "${MANIFEST_VERSION}" = "${PACKAGE_VERSION}"
+          test "${MANIFEST_ID}" = "${CWS_EXTENSION_ID}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            test "${GITHUB_REF_NAME}" = "v${MANIFEST_VERSION}"
+          fi
+
+      - name: Test and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+          npm run package
+
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.CWS_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.CWS_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.CWS_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+
+      - name: Upload package
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./manifest.json').version")"
+          PACKAGE="dist/transly-${VERSION}.zip"
+          curl \
+            --fail-with-body \
+            --request POST \
+            --upload-file "${PACKAGE}" \
+            --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+            --header "Content-Type: application/zip" \
+            "https://chromewebstore.googleapis.com/upload/v2/publishers/${CWS_PUBLISHER_ID}/items/${CWS_EXTENSION_ID}:upload"
+
+  submit:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'submit'
+    runs-on: ubuntu-latest
+    environment: chrome-web-store
+    env:
+      CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+      CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
+    steps:
+      - name: Validate release configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CWS_PUBLISHER_ID}"
+          test -n "${CWS_EXTENSION_ID}"
+          test -n "${{ vars.CWS_GCP_PROJECT_ID }}"
+          test -n "${{ vars.CWS_WORKLOAD_IDENTITY_PROVIDER }}"
+          test -n "${{ vars.CWS_SERVICE_ACCOUNT }}"
+
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.CWS_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.CWS_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.CWS_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+
+      - name: Submit staged release for review
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          curl \
+            --fail-with-body \
+            --request POST \
+            --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data '{"publishType":"STAGED_PUBLISH","skipReview":false,"blockOnWarnings":true}' \
+            "https://chromewebstore.googleapis.com/v2/publishers/${CWS_PUBLISHER_ID}/items/${CWS_EXTENSION_ID}:publish"

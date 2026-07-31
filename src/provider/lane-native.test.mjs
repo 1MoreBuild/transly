@@ -9,9 +9,9 @@ import {
   normalizeLaneConnection
 } from "./lane-native.js";
 
-const EXPECTED_TRANSLY_DEVELOPMENT_ID = "lmpgipgoelkfcbdpboffkbhniifhicdd";
+const EXPECTED_TRANSLY_EXTENSION_ID = "mdjfkiddlpdgchddcckhcmdjekmmhcgp";
 
-test("the source manifest keeps the development extension id trusted by Lane", async () => {
+test("the source manifest matches the Chrome Web Store extension id", async () => {
   const manifest = JSON.parse(await readFile(
     new URL("../../manifest.json", import.meta.url),
     "utf8"
@@ -26,7 +26,7 @@ test("the source manifest keeps the development extension id trusted by Lane", a
     .replace(/[0-9a-f]/g, (character) =>
       String.fromCharCode("a".charCodeAt(0) + Number.parseInt(character, 16))
     );
-  assert.equal(extensionId, EXPECTED_TRANSLY_DEVELOPMENT_ID);
+  assert.equal(extensionId, EXPECTED_TRANSLY_EXTENSION_ID);
   assert.ok(manifest.permissions.includes("nativeMessaging"));
 });
 

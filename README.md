@@ -5,6 +5,7 @@
 
   <p>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111" alt="MIT License"></a>
+    <a href="PRIVACY.md"><img src="https://img.shields.io/badge/privacy-policy-111111" alt="Privacy Policy"></a>
     <img src="https://img.shields.io/badge/browser-Chrome-4285F4" alt="Chrome">
     <img src="https://img.shields.io/badge/API-OpenAI%20compatible-FFC107" alt="OpenAI-compatible API">
   </p>
@@ -122,12 +123,15 @@ git diff --check
 
 The test suite does not send model requests. Reload Transly from `chrome://extensions` after source changes. `npm run package` creates a clean Chrome Web Store archive under `dist/`.
 
-Before the first Chrome Web Store release, upload an unpublished draft, copy
-its public key into `manifest.json`, and verify that the resulting unpacked ID
-matches the Dashboard Item ID. Lane's fixed Transly allowlist must be updated
-to that verified ID before either production build is released. Do not replace
-the fixed allowlist with a wildcard. See Chrome's
+The source manifest uses the verified Chrome Web Store public key, so unpacked
+builds use the production extension ID `mdjfkiddlpdgchddcckhcmdjekmmhcgp`.
+Lane's fixed Transly allowlist must include that ID before either production
+build is released. Do not replace the fixed allowlist with a wildcard. See Chrome's
 [manifest key documentation](https://developer.chrome.com/docs/extensions/reference/manifest/key).
+
+Chrome Web Store listing copy, privacy declarations, asset requirements, and
+the automated release setup are documented in
+[Chrome Web Store Release](docs/chrome-web-store.md).
 
 ## Credits
 

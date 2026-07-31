@@ -38,10 +38,9 @@ Native Messaging host for a connection. Chrome and Lane both restrict this path
 to Transly's stable extension ID. Lane returns its loopback URL, client key, and
 public model IDs; provider OAuth tokens and upstream API keys remain in Lane.
 
-The source manifest currently fixes the development extension ID. Before the
-first Chrome Web Store release, the repository manifest key and Lane allowlist
-must be updated to the verified Developer Dashboard public key and Item ID.
-Neither side may use a wildcard origin.
+The source manifest uses the verified Chrome Web Store public key so unpacked
+builds and Store installs share the same extension ID. Lane must explicitly
+allow that production ID; neither side may use a wildcard origin.
 Failure is silent and falls back to the normal configuration page. Explicitly
 choosing **Connect Lane** can replace an existing provider configuration.
 

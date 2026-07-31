@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,12 @@ try {
   for (const relativePath of rootFiles) {
     await cp(path.join(projectRoot, relativePath), path.join(stagingDir, relativePath));
   }
+  const storeManifest = { ...manifest };
+  delete storeManifest.key;
+  await writeFile(
+    path.join(stagingDir, "manifest.json"),
+    `${JSON.stringify(storeManifest, null, 2)}\n`
+  );
   await cp(path.join(projectRoot, "assets", "icons"), path.join(stagingDir, "assets", "icons"), { recursive: true });
   await cp(path.join(projectRoot, "src"), path.join(stagingDir, "src"), {
     recursive: true,

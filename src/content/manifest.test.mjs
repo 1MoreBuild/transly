@@ -3,6 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const manifest = JSON.parse(await readFile(new URL("../../manifest.json", import.meta.url), "utf8"));
+const packageMetadata = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
+
+test("package and extension versions stay aligned", () => {
+  assert.equal(manifest.version, packageMetadata.version);
+});
 
 test("article scripts run in frames without duplicating subtitle runtime", () => {
   const articleEntry = manifest.content_scripts.find((entry) => entry.js?.includes("src/content/article.js"));
