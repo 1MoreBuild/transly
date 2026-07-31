@@ -138,7 +138,13 @@ Prefer three current screenshots:
 
 1. A translated article in bilingual mode.
 2. Translation-only mode with the original revealed for one passage.
-3. Provider setup showing automatic Lane connection and the model dropdown.
+3. Provider setup showing API configuration and the model dropdown.
+
+The bilingual article scene is stored as editable HTML at
+`marketing/chrome-web-store/article-bilingual.html`. Keep both outputs current:
+
+- `transly-article-bilingual-1280x800.png` for Chrome Web Store upload;
+- `transly-article-bilingual-2560x1600.png` for high-density README display.
 
 Do not use screenshots that expose API keys, local client keys, browser profile
 details, or private webpage content.
