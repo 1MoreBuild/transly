@@ -101,6 +101,7 @@ jobs:
           service_account: ${{ vars.CWS_SERVICE_ACCOUNT }}
           token_format: access_token
           access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+          create_credentials_file: false
 
       - name: Upload package
         shell: bash
@@ -181,6 +182,7 @@ jobs:
           service_account: ${{ vars.CWS_SERVICE_ACCOUNT }}
           token_format: access_token
           access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+          create_credentials_file: false
 
       - name: Submit release for review and automatic publishing
         shell: bash

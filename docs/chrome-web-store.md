@@ -121,10 +121,11 @@ Certify every Limited Use statement that matches the behavior described in
 - Pricing: Free
 - Regions: All regions unless a provider or legal requirement requires a
   narrower distribution
-- Publishing: Staged publish for the first releases
+- Publishing: Automatic after review for tagged releases
 
-Staged publishing submits the package for review but requires a separate manual
-publish action after approval.
+The protected GitHub environment keeps submission deliberate. After approval,
+the workflow submits the package for review and Chrome Web Store publishes it
+automatically when the review passes.
 
 ## Graphic Assets
 
