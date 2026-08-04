@@ -48,13 +48,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          MANIFEST_VERSION="$(node -p "require('./manifest.json').version")"
           PACKAGE_VERSION="$(node -p "require('./package.json').version")"
-          MANIFEST_ID="$(node -e "const c=require('crypto');const m=require('./manifest.json');const h=c.createHash('sha256').update(Buffer.from(m.key,'base64')).digest().subarray(0,16);process.stdout.write([...h].map(b=>String.fromCharCode(97+(b>>4),97+(b&15))).join(''))")"
-          test "${MANIFEST_VERSION}" = "${PACKAGE_VERSION}"
+          MANIFEST_ID="$(node --input-type=module -e "import c from 'node:crypto';import {extensionManifest as m} from './extension.manifest.mjs';const h=c.createHash('sha256').update(Buffer.from(m.key,'base64')).digest().subarray(0,16);process.stdout.write([...h].map(b=>String.fromCharCode(97+(b>>4),97+(b&15))).join(''))")"
           test "${MANIFEST_ID}" = "${CWS_EXTENSION_ID}"
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            test "${GITHUB_REF_NAME}" = "v${MANIFEST_VERSION}"
+            test "${GITHUB_REF_NAME}" = "v${PACKAGE_VERSION}"
           fi
 
       - name: Install dependencies
@@ -76,8 +74,8 @@ jobs:
         with:
           name: transly-release-e2e-${{ github.run_attempt }}
           path: |
-            playwright-report/
-            test-results/
+            dist/playwright-report/
+            dist/test-results/
           if-no-files-found: ignore
           retention-days: 14
 
@@ -86,6 +84,14 @@ jobs:
         run: |
           set -euo pipefail
           npm run package
+
+      - name: Retain release package
+        uses: actions/upload-artifact@v7
+        with:
+          name: transly-${{ github.ref_name }}-${{ github.run_attempt }}
+          path: dist/transly-*.zip
+          if-no-files-found: error
+          retention-days: 30
 
       - id: auth
         uses: google-github-actions/auth@v3
@@ -102,18 +108,55 @@ jobs:
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
           set -euo pipefail
-          VERSION="$(node -p "require('./manifest.json').version")"
+          VERSION="$(node -p "require('./package.json').version")"
           PACKAGE="dist/transly-${VERSION}.zip"
+          UPLOAD_RESPONSE="$(mktemp)"
+          STATUS_RESPONSE="$(mktemp)"
+          trap 'rm -f "${UPLOAD_RESPONSE}" "${STATUS_RESPONSE}"' EXIT
           curl \
             --fail-with-body \
+            --silent \
+            --show-error \
             --request POST \
             --upload-file "${PACKAGE}" \
             --header "Authorization: Bearer ${ACCESS_TOKEN}" \
             --header "Content-Type: application/zip" \
+            --output "${UPLOAD_RESPONSE}" \
             "https://chromewebstore.googleapis.com/upload/v2/publishers/${CWS_PUBLISHER_ID}/items/${CWS_EXTENSION_ID}:upload"
+          jq . "${UPLOAD_RESPONSE}"
+
+          UPLOAD_STATE="$(jq -r '.uploadState // empty' "${UPLOAD_RESPONSE}")"
+          for attempt in $(seq 1 30); do
+            case "${UPLOAD_STATE}" in
+              SUCCEEDED)
+                break
+                ;;
+              IN_PROGRESS)
+                sleep 10
+                curl \
+                  --fail-with-body \
+                  --silent \
+                  --show-error \
+                  --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+                  --output "${STATUS_RESPONSE}" \
+                  "https://chromewebstore.googleapis.com/v2/publishers/${CWS_PUBLISHER_ID}/items/${CWS_EXTENSION_ID}:fetchStatus"
+                jq . "${STATUS_RESPONSE}"
+                UPLOAD_STATE="$(jq -r '.lastAsyncUploadState // empty' "${STATUS_RESPONSE}")"
+                ;;
+              *)
+                echo "Chrome Web Store upload failed with state: ${UPLOAD_STATE:-missing}" >&2
+                exit 1
+                ;;
+            esac
+          done
+          test "${UPLOAD_STATE}" = "SUCCEEDED"
 
   submit:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'submit'
+    needs: upload
+    if: >-
+      always() &&
+      ((github.event_name == 'push' && needs.upload.result == 'success') ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'submit'))
     runs-on: ubuntu-latest
     environment: chrome-web-store
     env:
@@ -139,7 +182,7 @@ jobs:
           token_format: access_token
           access_token_scopes: https://www.googleapis.com/auth/chromewebstore
 
-      - name: Submit staged release for review
+      - name: Submit release for review and automatic publishing
         shell: bash
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
@@ -150,5 +193,5 @@ jobs:
             --request POST \
             --header "Authorization: Bearer ${ACCESS_TOKEN}" \
             --header "Content-Type: application/json" \
-            --data '{"publishType":"STAGED_PUBLISH","skipReview":false,"blockOnWarnings":true}' \
+            --data '{"publishType":"DEFAULT_PUBLISH","skipReview":false,"blockOnWarnings":true}' \
             "https://chromewebstore.googleapis.com/v2/publishers/${CWS_PUBLISHER_ID}/items/${CWS_EXTENSION_ID}:publish"

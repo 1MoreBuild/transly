@@ -195,9 +195,12 @@ Release flow:
 1. Bump `package.json`; WXT writes that version into the generated manifest.
 2. Push a matching tag such as `v0.1.0`.
 3. The workflow installs Chromium, runs unit tests and real-extension E2E
-   journeys against a deterministic local provider, then packages and uploads
-   the draft.
-4. Manually run **Chrome Web Store Release** with mode `submit`.
-5. Approve the protected environment. The workflow submits a staged publish for
-   review.
-6. Publish manually in the Developer Dashboard after review approval.
+   journeys against a deterministic local provider, packages the extension,
+   retains the ZIP as a workflow artifact, uploads it, and waits for asynchronous
+   Store processing to finish.
+4. Approve the protected `chrome-web-store` GitHub environment. The same tag
+   workflow then submits the uploaded package for review.
+5. Chrome Web Store publishes the release automatically after it passes review.
+
+The manual `upload` and `submit` workflow modes remain available for recovery.
+Manual `submit` also uses automatic publishing after Store approval.
