@@ -186,7 +186,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         articleError: articleRuntimeState.error,
         articleDisplayMode,
         clientRequestId: activeArticleClientRunId || null,
-        subtitleEnabled: document.documentElement.dataset.translySubtitlesEnabled === "true"
+        subtitleEnabled: document.documentElement.dataset.translySubtitlesEnabled === "true",
+        subtitleStatus: document.documentElement.dataset.translySubtitleStatus || "off",
+        subtitleError: document.documentElement.dataset.translySubtitleError || "",
+        subtitleCueCount: Number(document.documentElement.dataset.translySubtitleCueCount || 0)
       }
     });
     return true;
@@ -1043,7 +1046,7 @@ function markBatch(batch, state) {
   for (const item of batch) {
     const working = state === "working";
     item.element.classList.toggle("transly-working", working);
-    item.element.classList.toggle("transly-error", state === "error");
+    item.element.classList.remove("transly-error");
     if (working) {
       ensureLoadingTranslation(item);
     } else if (state === "idle") {
@@ -1054,9 +1057,10 @@ function markBatch(batch, state) {
 
 function markFailedBatch(batch) {
   for (const item of batch) {
-    item.element.classList.remove("transly-working");
-    item.element.classList.add("transly-error");
+    item.element.classList.remove("transly-working", "transly-error", "transly-source-revealed");
     if (getTranslationNode(item.element)) removeExistingTranslation(item.element);
+    delete item.element.dataset.translyArticleId;
+    delete item.element.dataset.translyTranslated;
   }
 }
 

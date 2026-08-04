@@ -57,6 +57,28 @@ test("placeholder repair adds only a compact structural reminder", () => {
   assert.doesNotMatch(request.prompt, /placeholderRepair|article-1|example\.com/);
 });
 
+test("subtitle prompt translates semantic groups and aligns them back to timed cues", () => {
+  const request = buildTranslationRequest({
+    ...payload,
+    mode: "subtitle",
+    context: "A complete transcript that establishes names and references.",
+    items: [
+      { id: "cue-1", text: "Welcome to the conference,", subtitleGroup: 1 },
+      { id: "cue-2", text: "where builders share their work.", subtitleGroup: 1 },
+      { id: "cue-3", text: "Now let's begin.", subtitleGroup: 2 }
+    ]
+  });
+
+  assert.match(request.instructions, /spoken Simplified Chinese/);
+  assert.match(request.instructions, /full transcript context only to understand meaning/);
+  assert.match(request.instructions, /understand each complete group as one utterance/);
+  assert.match(request.instructions, /distribute its translation back across that group's timed cues/);
+  assert.match(request.instructions, /never move meaning across groups/);
+  assert.match(request.prompt, /SUBTITLE GROUP SIZES\n2, 1/);
+  assert.match(request.prompt, /complete transcript/);
+  assert.doesNotMatch(request.prompt, /cue-1|cue-2|cue-3/);
+});
+
 test("array translations map back to internal ids and reject malformed output", () => {
   assert.deepEqual(normalizeTranslationResult(["更好的模型：更差的工具", "一个奇怪的问题让我越挖越深。"], payload), {
     items: [

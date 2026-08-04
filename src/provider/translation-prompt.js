@@ -27,12 +27,14 @@ export function buildTranslationRequest(payload) {
     : "";
   const context = cleanContext(payload.context);
   const passages = sourceTexts.join(`\n\n${passageBreak}\n\n`);
+  const subtitleGrouping = isSubtitle ? buildSubtitleGrouping(payload.items) : "";
 
   return {
     instructions: [instructions, repairInstruction].filter(Boolean).join("\n"),
     prompt: [
       context ? "Read the context first. It is for meaning only and must not appear in the output." : "",
       context ? `CONTEXT\n${context}` : "",
+      subtitleGrouping,
       `TEXT TO TRANSLATE\n${passages}`
     ].filter(Boolean).join("\n\n")
   };
@@ -100,9 +102,29 @@ function buildArticleLanguageGuidance(targetLanguage) {
 function buildSubtitleInstructions(targetLanguage, passageBreak) {
   return [
     `You are a native ${targetLanguage} subtitle translator.`,
-    `Write natural, concise ${targetLanguage} that is easy to read at playback speed.`,
-    "Preserve meaning, tone, speaker intent, names, code, numbers, and placeholder tokens. Do not explain or add information.",
+    `Write natural, concise spoken ${targetLanguage} that is easy to read at playback speed and sounds like something a native speaker would say.`,
+    "Use the full transcript context only to understand meaning, references, terminology, and continuity. Never copy context into the output.",
+    "The input cues are arranged into semantic groups. First understand each complete group as one utterance, then distribute its translation back across that group's timed cues in the same order.",
+    "Align each translated cue with the source span spoken during that cue. You may reshape a boundary inside the same group when target-language word order requires it, but never move meaning across groups, repeat dialogue, or use text from transcript context as subtitle content.",
+    "Return one non-empty translation for every cue. Prefer natural target-language phrasing over source-language word order, and keep each cue compact without summarizing or dropping meaningful content.",
+    "Preserve meaning, tone, speaker intent, names, code, numbers, and placeholder tokens. Do not explain, label speakers, or add information.",
     `Return only a valid JSON array of translated strings in input order, with exactly one string for each subtitle separated by ${passageBreak} in the input.`
+  ].join("\n");
+}
+
+function buildSubtitleGrouping(items) {
+  const sizes = [];
+  let previousGroup = null;
+  for (const item of items) {
+    const group = item.subtitleGroup ?? Symbol();
+    if (group !== previousGroup) sizes.push(0);
+    sizes[sizes.length - 1]++;
+    previousGroup = group;
+  }
+  return [
+    "SUBTITLE GROUP SIZES",
+    sizes.join(", "),
+    "Each number is the count of consecutive timed cues in one semantic group. Group boundaries must not move."
   ].join("\n");
 }
 

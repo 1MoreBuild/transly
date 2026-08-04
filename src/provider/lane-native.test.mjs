@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { extensionManifest } from "../../extension.manifest.mjs";
 import {
   connectLane,
   LANE_NATIVE_HOST_NAME,
@@ -11,13 +11,9 @@ import {
 
 const EXPECTED_TRANSLY_EXTENSION_ID = "mdjfkiddlpdgchddcckhcmdjekmmhcgp";
 
-test("the source manifest matches the Chrome Web Store extension id", async () => {
-  const manifest = JSON.parse(await readFile(
-    new URL("../../manifest.json", import.meta.url),
-    "utf8"
-  ));
+test("the WXT manifest metadata matches the Chrome Web Store extension id", async () => {
   const digest = createHash("sha256")
-    .update(Buffer.from(manifest.key, "base64"))
+    .update(Buffer.from(extensionManifest.key, "base64"))
     .digest()
     .subarray(0, 16);
   const extensionId = [...digest]
@@ -27,7 +23,7 @@ test("the source manifest matches the Chrome Web Store extension id", async () =
       String.fromCharCode("a".charCodeAt(0) + Number.parseInt(character, 16))
     );
   assert.equal(extensionId, EXPECTED_TRANSLY_EXTENSION_ID);
-  assert.ok(manifest.permissions.includes("nativeMessaging"));
+  assert.ok(extensionManifest.permissions.includes("nativeMessaging"));
 });
 
 test("Lane Native Messaging returns a ready provider configuration", async () => {

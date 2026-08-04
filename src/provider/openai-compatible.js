@@ -35,7 +35,10 @@ export async function testProvider(config, options = {}) {
 
 export async function listProviderModels(config, options = {}) {
   const { modelsUrl } = resolveProviderEndpoint(config);
-  const controller = createTimeoutController(options.signal, 15_000);
+  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : 15_000;
+  const controller = createTimeoutController(options.signal, timeoutMs);
   try {
     const response = await fetch(modelsUrl, {
       method: "GET",

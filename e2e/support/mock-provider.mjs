@@ -5,6 +5,47 @@ const ARTICLE_HTML = await readFile(
   new URL("../fixtures/article.html", import.meta.url),
   "utf8"
 );
+const SUBTITLE_HTML = await readFile(
+  new URL("../fixtures/subtitle.html", import.meta.url),
+  "utf8"
+);
+const SUBTITLE_SEMANTIC_HTML = await readFile(
+  new URL("../fixtures/subtitle-semantic.html", import.meta.url),
+  "utf8"
+);
+const SUBTITLE_TRACK_HTML = await readFile(
+  new URL("../fixtures/subtitle-track.html", import.meta.url),
+  "utf8"
+);
+const SUBTITLE_TRIGGER_HTML = await readFile(
+  new URL("../fixtures/subtitle-trigger.html", import.meta.url),
+  "utf8"
+);
+const SUBTITLE_DISABLED_TRACK_HTML = await readFile(
+  new URL("../fixtures/subtitle-track-disabled.html", import.meta.url),
+  "utf8"
+);
+const SUBTITLE_VIDEO = await readFile(new URL("../fixtures/subtitle.mp4", import.meta.url));
+const SUBTITLE_VTT = `WEBVTT
+
+00:00:00.000 --> 00:00:02.500
+First caption from the video.
+
+00:00:03.000 --> 00:00:05.500
+Second caption from the video.`;
+const SUBTITLE_SEMANTIC_VTT = `WEBVTT
+
+00:00:00.000 --> 00:00:02.500
+Welcome to the second annual Code with Claude conference,
+
+00:00:02.550 --> 00:00:05.500
+where builders share what they learned.`;
+const SUBTITLE_JSON3 = JSON.stringify({
+  events: [
+    { tStartMs: 0, dDurationMs: 2500, segs: [{ utf8: "First caption from the video." }] },
+    { tStartMs: 3000, dDurationMs: 2500, segs: [{ utf8: "Second caption from the video." }] }
+  ]
+});
 const API_KEY = "transly-e2e-key";
 const MODELS = [
   "openai/gpt-e2e-primary",
@@ -14,6 +55,7 @@ const MODELS = [
 
 export async function startMockProvider() {
   const state = {
+    offline: false,
     failNextTranslation: false,
     streamDelayMs: 260,
     requests: []
@@ -32,8 +74,61 @@ export async function startMockProvider() {
       response.end(ARTICLE_HTML);
       return;
     }
+    if (request.method === "GET" && url.pathname === "/subtitle.html") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(SUBTITLE_HTML);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/subtitle-semantic.html") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(SUBTITLE_SEMANTIC_HTML);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/subtitle-track.html") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(SUBTITLE_TRACK_HTML);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/subtitle-trigger.html") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(SUBTITLE_TRIGGER_HTML);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/subtitle-track-disabled.html") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(SUBTITLE_DISABLED_TRACK_HTML);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/timedtext") {
+      response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      response.end(SUBTITLE_JSON3);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/captions.vtt") {
+      response.writeHead(200, { "content-type": "text/vtt; charset=utf-8" });
+      response.end(SUBTITLE_VTT);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/captions-semantic.vtt") {
+      response.writeHead(200, { "content-type": "text/vtt; charset=utf-8" });
+      response.end(SUBTITLE_SEMANTIC_VTT);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/subtitle.mp4") {
+      response.writeHead(200, {
+        "accept-ranges": "bytes",
+        "content-length": SUBTITLE_VIDEO.length,
+        "content-type": "video/mp4"
+      });
+      response.end(SUBTITLE_VIDEO);
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/health") {
       respondJson(response, 200, { ok: true });
+      return;
+    }
+    if (state.offline && url.pathname.startsWith("/v1/")) {
+      respondJson(response, 503, { error: { message: "Provider is offline" } });
       return;
     }
     if (url.pathname.startsWith("/v1/") && request.headers.authorization !== `Bearer ${API_KEY}`) {
@@ -85,6 +180,11 @@ export async function startMockProvider() {
     apiKey: API_KEY,
     apiUrl: `${origin}/v1`,
     articleUrl: `${origin}/article.html`,
+    subtitleUrl: `${origin}/subtitle.html`,
+    subtitleSemanticUrl: `${origin}/subtitle-semantic.html`,
+    subtitleTrackUrl: `${origin}/subtitle-track.html`,
+    subtitleTriggerUrl: `${origin}/subtitle-trigger.html`,
+    subtitleDisabledTrackUrl: `${origin}/subtitle-track-disabled.html`,
     models: MODELS.slice(),
     state,
     translationRequests() {
@@ -148,6 +248,8 @@ function extractPassages(prompt) {
 
 function translatePassage(source, index) {
   const placeholders = source.match(/\[\[TRANSLY_PH_\d+]]/g) || [];
+  if (source.includes("First caption from the video")) return "视频中的第一句字幕。";
+  if (source.includes("Second caption from the video")) return "视频中的第二句字幕。";
   const translations = [
     "上下文让翻译更准确",
     "孤立来看，产品名称可能只有一种含义；放进完整文章后，它往往会变得更精确。",

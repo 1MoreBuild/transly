@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 import { startMockProvider } from "./mock-provider.mjs";
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const EXTENSION_ROOT = path.join(
+  REPOSITORY_ROOT,
+  "dist",
+  process.env.TRANSLY_E2E === "1" ? "extension-e2e" : "extension"
+);
 
 export const test = base.extend({
   provider: async ({}, use) => {
@@ -34,8 +39,8 @@ export const test = base.extend({
           size: { width: 1280, height: 900 }
         },
         args: [
-          `--disable-extensions-except=${REPOSITORY_ROOT}`,
-          `--load-extension=${REPOSITORY_ROOT}`
+          `--disable-extensions-except=${EXTENSION_ROOT}`,
+          `--load-extension=${EXTENSION_ROOT}`
         ]
       });
       await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
@@ -112,6 +117,7 @@ export const expect = test.expect;
 export async function configureProvider(extension, provider, model = provider.models[0]) {
   const page = await extension.context.newPage();
   await page.goto(`chrome-extension://${extension.extensionId}/options.html`);
+  await expect(page.locator("html")).toHaveAttribute("data-transly-options-ready", "true");
   await expect(page.locator("#connectLane")).toBeEnabled();
   await page.locator("#apiUrl").fill(provider.apiUrl);
   await page.locator("#apiKey").fill(provider.apiKey);
@@ -121,6 +127,9 @@ export async function configureProvider(extension, provider, model = provider.mo
   await page.locator(`.model-option[data-value="${model}"]`).click();
   await page.locator("#connectProvider").click();
   await expect(page.locator("#providerStatus")).toHaveText(/connected/i);
+  if (process.env.TRANSLY_OPTIONS_CAPTURE) {
+    await page.screenshot({ path: process.env.TRANSLY_OPTIONS_CAPTURE, fullPage: true, animations: "disabled" });
+  }
   await page.close();
 }
 
@@ -132,10 +141,50 @@ export async function openArticle(extension, provider) {
   return { page, tabId };
 }
 
+export async function openSubtitlePage(extension, provider) {
+  const page = await extension.context.newPage();
+  await page.goto(provider.subtitleUrl);
+  await expect(page.locator("video")).toBeVisible();
+  const tabId = await waitForArticleContentScript(extension, provider.subtitleUrl);
+  return { page, tabId };
+}
+
+export async function openSemanticSubtitlePage(extension, provider) {
+  const page = await extension.context.newPage();
+  await page.goto(provider.subtitleSemanticUrl);
+  await expect(page.locator("video")).toBeVisible();
+  const tabId = await waitForArticleContentScript(extension, provider.subtitleSemanticUrl);
+  return { page, tabId };
+}
+
+export async function openTextTrackPage(extension, provider) {
+  const page = await extension.context.newPage();
+  await page.goto(provider.subtitleTrackUrl);
+  await expect(page.locator("video")).toBeVisible();
+  const tabId = await waitForArticleContentScript(extension, provider.subtitleTrackUrl);
+  return { page, tabId };
+}
+
+export async function openTriggeredSubtitlePage(extension, provider) {
+  const page = await extension.context.newPage();
+  await page.goto(provider.subtitleTriggerUrl);
+  await expect(page.locator("video")).toBeVisible();
+  const tabId = await waitForArticleContentScript(extension, provider.subtitleTriggerUrl);
+  return { page, tabId };
+}
+
+export async function openDisabledTextTrackPage(extension, provider) {
+  const page = await extension.context.newPage();
+  await page.goto(provider.subtitleDisabledTrackUrl);
+  await expect(page.locator("video")).toBeVisible();
+  const tabId = await waitForArticleContentScript(extension, provider.subtitleDisabledTrackUrl);
+  return { page, tabId };
+}
+
 export async function openPopup(extension, tabId) {
   const page = await extension.context.newPage();
   await page.goto(`chrome-extension://${extension.extensionId}/popup.html?tabId=${tabId}`);
-  await expect(page.locator("#connectionLabel")).not.toHaveText("Checking");
+  await expect(page.locator("#providerState")).not.toHaveText("Checking");
   return page;
 }
 

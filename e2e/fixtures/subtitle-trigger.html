@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Transly E2E Triggered Captions</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111318; }
+      .html5-video-player { position: relative; width: min(960px, 90vw); }
+      video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #222631; }
+      .ytp-right-controls { position: absolute; right: 12px; bottom: 10px; display: flex; height: 48px; align-items: center; }
+      .ytp-subtitles-button { width: 48px; height: 48px; border: 0; color: white; background: transparent; }
+    </style>
+  </head>
+  <body>
+    <div class="html5-video-player ytp-autohide">
+      <video id="player" aria-label="Triggered caption test video" src="/subtitle.mp4" muted autoplay loop></video>
+      <div class="ytp-right-controls">
+        <span class="caption-control-wrapper">
+          <button class="ytp-subtitles-button" type="button" aria-pressed="false">CC</button>
+        </span>
+      </div>
+    </div>
+    <script>
+      const player = document.querySelector("#player");
+      const button = document.querySelector(".ytp-subtitles-button");
+      button.addEventListener("click", () => {
+        const enabled = button.getAttribute("aria-pressed") !== "true";
+        button.setAttribute("aria-pressed", String(enabled));
+        if (enabled) fetch("/api/timedtext?lang=en&fmt=json3").then((response) => response.text());
+      });
+      window.setSubtitleTime = (time) => { player.currentTime = time; };
+    </script>
+  </body>
+</html>

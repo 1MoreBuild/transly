@@ -19,8 +19,17 @@ const DEFAULT_SETTINGS = Object.freeze({
   enableArticleAuditLoop: true,
   articleAuditMaxBlocks: 60,
   articleAuditMaxRepairItems: 20,
-  subtitleBatchChars: 9000
+  subtitleEnabled: false,
+  subtitleDisplayMode: "bilingual",
+  subtitleLanguageOrder: "source-first",
+  subtitleSourceFontSizePx: 25,
+  subtitleTranslationFontSizePx: 30,
+  subtitlePositionPercent: 6,
+  subtitleBackgroundOpacity: 0.76,
+  subtitleBatchChars: 1200,
+  subtitleBatchMaxItems: 12
 });
+const PROVIDER_STATUS_TIMEOUT_MS = 3_000;
 
 export function registerBackground(chromeApi, dependencies = {}) {
   const service = dependencies.service || createTranslationService();
@@ -43,15 +52,25 @@ export function registerBackground(chromeApi, dependencies = {}) {
     if (message?.type === "TRANSLY_PROVIDER_STATUS") {
       readProviderConfig(chromeApi.storage.local)
         .then(async (config) => {
-          if (providerSummary(config).configured) return config;
+          if (!providerSummary(config).configured) {
+            try {
+              const lane = await connectLaneProvider();
+              config = await writeProviderConfig(chromeApi.storage.local, lane.config);
+            } catch {
+              return providerSummary(config);
+            }
+          }
+          const summary = providerSummary(config);
           try {
-            const lane = await connectLaneProvider();
-            return await writeProviderConfig(chromeApi.storage.local, lane.config);
-          } catch {
-            return config;
+            await checkProvider(validateProviderConfig(config), {
+              timeoutMs: PROVIDER_STATUS_TIMEOUT_MS
+            });
+            return { ...summary, available: true };
+          } catch (error) {
+            return { ...summary, available: false, error: formatError(error) };
           }
         })
-        .then((config) => sendResponse({ ok: true, data: providerSummary(config) }))
+        .then((data) => sendResponse({ ok: true, data }))
         .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
       return true;
     }
@@ -171,8 +190,20 @@ export function registerBackground(chromeApi, dependencies = {}) {
     }
 
     if (message?.type === "TRANSLY_GET_SETTINGS") {
-      chromeApi.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
+      chromeApi.storage.sync.get(null, (storedSettings) => {
         const error = chromeApi.runtime.lastError;
+        const settings = normalizeSettings(storedSettings);
+        const migratedFontSizes = {};
+        if (storedSettings?.subtitleSourceFontSizePx === undefined && storedSettings?.subtitleSourceFontScale !== undefined) {
+          migratedFontSizes.subtitleSourceFontSizePx = settings.subtitleSourceFontSizePx;
+        }
+        if (
+          storedSettings?.subtitleTranslationFontSizePx === undefined
+          && storedSettings?.subtitleTranslationFontScale !== undefined
+        ) {
+          migratedFontSizes.subtitleTranslationFontSizePx = settings.subtitleTranslationFontSizePx;
+        }
+        if (!error && Object.keys(migratedFontSizes).length) chromeApi.storage.sync.set(migratedFontSizes);
         sendResponse(error
           ? { ok: false, error: error.message }
           : { ok: true, data: settings });
@@ -190,6 +221,25 @@ export function registerBackground(chromeApi, dependencies = {}) {
 
     return false;
   });
+}
+
+export function normalizeSettings(storedSettings = {}) {
+  const settings = { ...DEFAULT_SETTINGS, ...storedSettings };
+  if (storedSettings.subtitleSourceFontSizePx === undefined && storedSettings.subtitleSourceFontScale !== undefined) {
+    settings.subtitleSourceFontSizePx = legacySubtitleFontSize(storedSettings.subtitleSourceFontScale);
+  }
+  if (
+    storedSettings.subtitleTranslationFontSizePx === undefined
+    && storedSettings.subtitleTranslationFontScale !== undefined
+  ) {
+    settings.subtitleTranslationFontSizePx = legacySubtitleFontSize(storedSettings.subtitleTranslationFontScale);
+  }
+  return settings;
+}
+
+function legacySubtitleFontSize(scale) {
+  const pixelSize = Math.round(Number(scale) * 30);
+  return Number.isFinite(pixelSize) ? Math.min(56, Math.max(14, pixelSize)) : 30;
 }
 
 async function withProviderConfig(chromeApi, operation) {
@@ -222,5 +272,3 @@ function formatError(error) {
   const code = error?.code ? `[${error.code}] ` : "";
   return `${code}${String(error?.message || error)}`;
 }
-
-if (globalThis.chrome?.runtime?.onMessage) registerBackground(globalThis.chrome);

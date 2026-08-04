@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Transly E2E Video</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111318; }
+      video { width: 960px; height: 540px; max-width: 90vw; background: #222631; }
+    </style>
+  </head>
+  <body>
+    <video id="player" aria-label="Test video" src="/subtitle.mp4" muted autoplay loop></video>
+    <script>
+      const player = document.querySelector("#player");
+      window.setSubtitleTime = (time) => { player.currentTime = time; };
+      setTimeout(() => fetch("/captions.vtt").then((response) => response.text()), 80);
+    </script>
+  </body>
+</html>

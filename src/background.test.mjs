@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { registerBackground } from "./background.js";
+import { normalizeSettings, registerBackground } from "./background.js";
+
+test("legacy subtitle font scales migrate to explicit pixel sizes", () => {
+  const settings = normalizeSettings({
+    subtitleSourceFontScale: 0.75,
+    subtitleTranslationFontScale: 1.25
+  });
+
+  assert.equal(settings.subtitleSourceFontSizePx, 23);
+  assert.equal(settings.subtitleTranslationFontSizePx, 38);
+});
 
 test("translation progress is relayed to the requesting tab and frame", async (t) => {
   let runtimeListener;
@@ -210,6 +220,7 @@ test("provider status automatically connects Lane only when no provider is confi
   globalThis.chrome = chrome;
   t.after(() => delete globalThis.chrome);
   registerBackground(chrome, {
+    testProvider: async () => ({ ok: true, models: ["lane/model"] }),
     connectLane: async () => {
       laneCalls += 1;
       return {
@@ -232,7 +243,67 @@ test("provider status automatically connects Lane only when no provider is confi
   assert.equal(laneCalls, 1);
   assert.equal(first.data.model, "lane/model");
   assert.equal(second.data.model, "lane/model");
+  assert.equal(first.data.available, true);
+  assert.equal(second.data.available, true);
   assert.equal(first.data.apiKey, undefined);
+});
+
+test("provider status distinguishes saved configuration from current availability", async (t) => {
+  let runtimeListener;
+  const provider = {
+    apiUrl: "http://127.0.0.1:3210/v1",
+    apiKey: "lane-key",
+    model: "lane/model",
+    protocol: "responses"
+  };
+  const chrome = {
+    runtime: {
+      id: "transly-test",
+      lastError: null,
+      getURL(path) {
+        return `chrome-extension://transly-test/${path}`;
+      },
+      onMessage: {
+        addListener(listener) {
+          runtimeListener = listener;
+        }
+      }
+    },
+    storage: {
+      local: {
+        setAccessLevel() {
+          return Promise.resolve();
+        },
+        get(_defaults, callback) {
+          callback({ translationProvider: provider });
+        }
+      },
+      sync: {}
+    },
+    tabs: {}
+  };
+  globalThis.chrome = chrome;
+  t.after(() => delete globalThis.chrome);
+  registerBackground(chrome, {
+    testProvider: async (_config, options) => {
+      assert.equal(options.timeoutMs, 3_000);
+      throw new Error("fetch failed");
+    }
+  });
+
+  const response = await dispatch(runtimeListener, {
+    type: "TRANSLY_PROVIDER_STATUS"
+  }, {
+    id: "transly-test",
+    url: "chrome-extension://transly-test/popup.html"
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.data.configured, true);
+  assert.equal(response.data.available, false);
+  assert.equal(response.data.model, "lane/model");
+  assert.match(response.data.error, /fetch failed/);
+  assert.equal(response.data.apiKey, undefined);
 });
 
 test("popup can list and switch configured models without reading the API key", async (t) => {

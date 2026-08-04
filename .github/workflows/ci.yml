@@ -27,8 +27,8 @@ jobs:
         with:
           name: transly-e2e-${{ github.run_attempt }}
           path: |
-            playwright-report/
-            test-results/
+            dist/playwright-report/
+            dist/test-results/
           if-no-files-found: ignore
           retention-days: 14
       - run: npm run package

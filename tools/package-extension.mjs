@@ -4,45 +4,27 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
-const manifest = JSON.parse(await readFile(path.join(projectRoot, "manifest.json"), "utf8"));
+const packageMetadata = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
+const buildDir = path.join(projectRoot, "dist", "extension");
 const distDir = path.join(projectRoot, "dist");
 const stagingDir = path.join(distDir, ".extension-package");
-const outputPath = path.join(distDir, `transly-${manifest.version}.zip`);
-const rootFiles = [
-  "LICENSE",
-  "THIRD_PARTY_NOTICES.md",
-  "manifest.json",
-  "popup.css",
-  "popup.html",
-  "popup.js",
-  "options.css",
-  "options.html",
-  "options.js"
-];
+const outputPath = path.join(distDir, `transly-${packageMetadata.version}.zip`);
 
 await rm(stagingDir, { recursive: true, force: true });
 await rm(outputPath, { force: true });
 await mkdir(stagingDir, { recursive: true });
 
 try {
-  for (const relativePath of rootFiles) {
-    await cp(path.join(projectRoot, relativePath), path.join(stagingDir, relativePath));
-  }
+  await cp(buildDir, stagingDir, { recursive: true });
+  await cp(path.join(projectRoot, "LICENSE"), path.join(stagingDir, "LICENSE"));
+  await cp(path.join(projectRoot, "THIRD_PARTY_NOTICES.md"), path.join(stagingDir, "THIRD_PARTY_NOTICES.md"));
+  const manifest = JSON.parse(await readFile(path.join(stagingDir, "manifest.json"), "utf8"));
   const storeManifest = { ...manifest };
   delete storeManifest.key;
   await writeFile(
     path.join(stagingDir, "manifest.json"),
     `${JSON.stringify(storeManifest, null, 2)}\n`
   );
-  await cp(path.join(projectRoot, "assets", "icons"), path.join(stagingDir, "assets", "icons"), { recursive: true });
-  await cp(path.join(projectRoot, "assets", "providers"), path.join(stagingDir, "assets", "providers"), { recursive: true });
-  await cp(path.join(projectRoot, "src"), path.join(stagingDir, "src"), {
-    recursive: true,
-    filter(source) {
-      return !source.endsWith(".test.mjs");
-    }
-  });
-
   const result = spawnSync("zip", ["-qr", outputPath, "."], {
     cwd: stagingDir,
     encoding: "utf8"

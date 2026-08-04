@@ -9,12 +9,29 @@
     "node": ">=20"
   },
   "scripts": {
-    "package": "node tools/package-extension.mjs",
-    "test": "npm run test:unit && npm run test:e2e",
+    "dev": "wxt",
+    "build": "wxt build",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "wxt prepare",
+    "package": "npm run build && node tools/package-extension.mjs",
+    "test": "npm run typecheck && npm run test:unit && npm run test:e2e",
     "test:unit": "node --test src/*.test.mjs src/content/*.test.mjs src/provider/*.test.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "TRANSLY_E2E=1 wxt build && TRANSLY_E2E=1 playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1"
+    "@playwright/test": "^1.62.1",
+    "@types/chrome": "^0.2.5",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@wxt-dev/module-react": "^1.2.2",
+    "typescript": "^5.9.3",
+    "wxt": "^0.21.3"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.6.0",
+    "lucide-react": "^1.28.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }

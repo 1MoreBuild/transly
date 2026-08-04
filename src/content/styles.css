@@ -85,11 +85,6 @@ html[data-transly-article-display-mode="translation-only"]
   outline: none;
 }
 
-.transly-error {
-  outline: 1px dashed rgba(220, 38, 38, 0.55);
-  outline-offset: 2px;
-}
-
 .transly-loading {
   margin-top: 0.18em;
   margin-bottom: 0;
@@ -139,25 +134,72 @@ html[data-transly-article-display-mode="translation-only"]
 #transly-caption-window {
   position: fixed;
   left: 50%;
-  bottom: 9%;
+  bottom: 24px;
   z-index: 2147483647;
   transform: translateX(-50%);
-  width: min(86vw, 980px);
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.72);
+  box-sizing: border-box;
+  display: none;
+  width: max-content;
+  max-width: min(90vw, 980px);
+  padding: 8px 14px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, var(--transly-subtitle-background-opacity, 0.76));
   color: #fff;
-  font: 20px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  flex-direction: column;
+  gap: 3px;
+  font: 30px / 1.35 system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", sans-serif;
   text-align: center;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
   pointer-events: none;
+  white-space: pre-wrap;
 }
 
 #transly-caption-window .transly-caption-original {
-  opacity: 0.82;
+  opacity: 0.76;
+  font-size: var(--transly-subtitle-source-font-size, 25px);
+  order: 1;
 }
 
 #transly-caption-window .transly-caption-translation {
-  margin-top: 4px;
-  font-weight: 650;
+  font-size: var(--transly-subtitle-translation-font-size, 30px);
+  font-weight: 600;
+  order: 2;
+}
+
+#transly-caption-window[data-display-mode="source-only"] .transly-caption-translation,
+#transly-caption-window[data-display-mode="translation-only"] .transly-caption-original {
+  display: none;
+}
+
+#transly-caption-window[data-language-order="translation-first"] .transly-caption-original {
+  order: 2;
+}
+
+#transly-caption-window[data-language-order="translation-first"] .transly-caption-translation {
+  order: 1;
+}
+
+#transly-caption-window[data-display-mode="source-only"],
+#transly-caption-window[data-display-mode="translation-only"] {
+  gap: 0;
+}
+
+#transly-caption-window[data-display-mode="translation-only"] .transly-caption-translation {
+  margin-top: 0;
+}
+
+html[data-transly-subtitles-rendering="true"] .ytp-caption-window-container,
+html[data-transly-subtitles-rendering="true"] .caption-window,
+html[data-transly-subtitles-rendering="true"] .vp-captions,
+html[data-transly-subtitles-rendering="true"] .vjs-text-track-display,
+html[data-transly-subtitles-rendering="true"] .jw-captions,
+html[data-transly-subtitles-rendering="true"] .playkit-subtitles {
+  visibility: hidden !important;
+}
+
+html[data-transly-subtitles-rendering="true"] video::cue {
+  color: transparent;
+  background: transparent;
+  text-shadow: none;
 }
