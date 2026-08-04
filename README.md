@@ -4,6 +4,7 @@
   <p><strong>Read web articles in your language, without losing their context.</strong></p>
 
   <p>
+    <a href="https://chromewebstore.google.com/detail/transly/mdjfkiddlpdgchddcckhcmdjekmmhcgp"><img src="https://img.shields.io/badge/Install_from-Chrome_Web_Store-4285F4?logo=googlechrome&logoColor=white" alt="Install Transly from the Chrome Web Store"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111" alt="MIT License"></a>
     <a href="PRIVACY.md"><img src="https://img.shields.io/badge/privacy-policy-111111" alt="Privacy Policy"></a>
     <a href="https://github.com/1MoreBuild/transly/actions/workflows/ci.yml"><img src="https://github.com/1MoreBuild/transly/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
@@ -40,33 +41,8 @@ video.
 
 ### 1. Install The Extension
 
-```bash
-git clone https://github.com/1MoreBuild/transly.git
-cd transly
-npm install
-npm run build
-```
-
-Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**,
-and select the generated `dist/extension` folder.
-
-<details>
-<summary><strong>Install with a coding agent</strong></summary>
-
-Give this instruction to an agent with terminal access:
-
-```text
-Install the Transly Chrome extension from https://github.com/1MoreBuild/transly.
-Use the current checkout if it is Transly; otherwise clone it into a `transly`
-folder in the current workspace without asking me for a path. Read AGENTS.md,
-run the test suite, and do not make product changes during installation.
-
-When ready, give me the exact `dist/extension` folder to select in Chrome. Tell me to
-open chrome://extensions, enable Developer mode, choose Load unpacked, and select
-that generated folder. Do not send a real model request without asking first.
-```
-
-</details>
+[Install Transly from the official Chrome Web Store](https://chromewebstore.google.com/detail/transly/mdjfkiddlpdgchddcckhcmdjekmmhcgp),
+then pin it to the Chrome toolbar for quick access.
 
 ### 2. Connect A Model
 
@@ -79,6 +55,11 @@ and key. Transly supports hosted APIs, self-hosted services, and local proxies
 such as [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
 
 See [Provider Setup](docs/providers.md) for details.
+
+### 3. Translate
+
+Open an article and select **Translate this article** from the Transly popup. On
+YouTube, use the Transly control in the video player to translate subtitles.
 
 ## Product Scope
 

@@ -24,3 +24,10 @@ When asked to install Transly:
 - Preserve unrelated worktree changes and update focused documentation when behavior changes.
 
 Run `npm test`, `npm run package`, and `git diff --check` before finishing. The E2E suite must load the real unpacked extension and exercise user journeys against its deterministic local provider. State clearly whether verification used a real model request.
+
+## Releasing
+
+- A normal branch push runs CI only. It does not publish the extension.
+- Pushing a `v*` tag triggers `.github/workflows/chrome-web-store.yml`, which uploads the package and, after the protected environment approval, submits it for Chrome Web Store review and automatic publishing.
+- The same workflow can be dispatched manually to upload or submit a release.
+- Never bump the package version, create or push a release tag, dispatch the release workflow, approve its protected environment, or submit a Chrome Web Store release unless the user explicitly asks to release a new version.
