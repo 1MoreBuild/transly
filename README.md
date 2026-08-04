@@ -63,9 +63,10 @@ YouTube, use the Transly control in the video player to translate subtitles.
 
 ## Product Scope
 
-Article translation is the primary product. YouTube subtitle translation is in
-beta; live speech recognition and other video sites are not included. PDF,
-EPUB, OCR, image translation, and input-box translation are not supported.
+Article translation is the primary product. YouTube subtitle translation is
+available and working. The subtitle feature remains in beta; live speech
+recognition and other video sites are not included. PDF, EPUB, OCR, image
+translation, and input-box translation are not supported.
 
 ## Transly And Immersive Translate
 
@@ -84,7 +85,7 @@ and has not yet been measured in a published benchmark.
 
 ## Development
 
-Requires Node.js 20 or newer:
+Requires Node.js 24 LTS and npm:
 
 ```bash
 npm install
@@ -118,4 +119,4 @@ by Immersive Translate.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) • Haitian ([1MoreBuild](https://github.com/1MoreBuild))
