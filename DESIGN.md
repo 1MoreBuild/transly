@@ -1,10 +1,9 @@
 ---
-version: "1.1"
+version: "2.0"
 name: Transly
-description: Product-specific visual rules for Transly's extension surfaces and injected translations.
+description: Durable product design principles for translation across web content and video.
 colors:
   ink: "#20201E"
-  line: "#E7E5E0"
   surface: "#FFFFFF"
   primary: "#FFC41A"
   primary-hover: "#F5B900"
@@ -23,98 +22,76 @@ typography:
     lineHeight: 16px
     letterSpacing: 0
 rounded:
-  sm: 7px
   DEFAULT: 8px
-spacing:
-  unit: 4px
-  sm: 8px
-  md: 12px
-  lg: 16px
-  xl: 24px
 components:
   primary-action:
     backgroundColor: "{colors.primary}"
     textColor: "{colors.ink}"
     typography: "{typography.control}"
     rounded: "{rounded.DEFAULT}"
-    height: 44px
-    padding: 0 16px
   primary-action-hover:
     backgroundColor: "{colors.primary-hover}"
   owned-surface:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
-  divider:
-    backgroundColor: "{colors.line}"
-    height: 1px
+    typography: "{typography.body}"
   subtitle-overlay:
     backgroundColor: "{colors.subtitle-scrim}"
     textColor: "#FFFFFF"
-    rounded: "{rounded.sm}"
-    padding: 10px 18px
+    rounded: "{rounded.DEFAULT}"
 ---
 
 ## Purpose
 
-This file records decisions unique to Transly. Do not expand it into a general UI handbook.
+This file defines how Transly should make design decisions when the code does not already provide the answer. It is not a component catalog or a record of the current implementation.
 
-For general interface craft, use [`emil-design-eng`](https://github.com/emilkowalski/skills/tree/main/skills/emil-design-eng) and [`apple-design`](https://github.com/emilkowalski/skills/tree/main/skills/apple-design) when available. Use [`prototype`](https://github.com/emilkowalski/skills/tree/main/skills/prototype) for divergent visual exploration. Existing project conventions remain the fallback when those skills are unavailable.
+For general interface craft, use [`emil-design-eng`](https://github.com/emilkowalski/skills/tree/main/skills/emil-design-eng) and [`apple-design`](https://github.com/emilkowalski/skills/tree/main/skills/apple-design) when available. Use [`prototype`](https://github.com/emilkowalski/skills/tree/main/skills/prototype) for divergent exploration.
 
-## Brand Direction
+## Principles
 
-Transly uses **Action Yellow**: yellow is the brand color, concentrated on the single primary action that changes the page. The surrounding interface stays white, near-black, and neutral gray.
+### Content over chrome
 
-- Use `{colors.primary}` for Translate, Connect, or Save.
-- Never use yellow as an ambient tint, section background, or decoration.
-- Use green and red only for semantic status.
-- Avoid beige, gradients, decorative blobs, and card-heavy layouts.
+The translated content is the product. Transly should help people read and watch without making its own interface the center of attention. Remove controls, decoration, and explanation that do not improve the current task.
 
-## Owned Surfaces
+### Context before fragments
 
-The popup and settings page use the tokens above. They should feel like compact browser utilities, not marketing pages.
+Optimize for meaning, voice, and continuity across the whole work. Do not trade translation quality for implementation convenience by treating every visible string as an isolated unit.
 
-### Popup
+### Preserve the host
 
-- Keep the popup 352px wide.
-- Do not add a branded header; Chrome already identifies the extension.
-- Order the surface as target language, provider/model, then the primary action.
-- Once translated, change the primary action to Restore instead of adding a separate Clear section.
-- Keep API URLs, keys, and provider internals behind settings.
-- Show the provider icon, model, provider name, and specific readiness state. Prefer “Lane is offline” over “Unavailable.”
+Translation should add understanding without redesigning the source. Preserve hierarchy, relationships, links, lists, tables, code, formulas, timing, and other semantic structure. Adapt to the host where that improves continuity; establish a neutral Transly surface only where Transly owns the experience.
 
-### Settings
+### Yellow marks commitment
 
-- Use one column with a maximum width of 760px.
-- Put common connection choices first and protocol details under Advanced.
-- Use Base UI for selects and comboboxes.
-- Place errors beside the action or field that caused them.
+Yellow is Transly's brand color and a promise of action. Reserve it for the primary choice that changes content or confirms a consequential setup step. Do not use it as ambient decoration. Status colors must describe status, not brand.
 
-## Injected Article Content
+### Show useful progress
 
-Injected content belongs visually to the host page, not to Transly's popup.
+Return complete, meaningful units as soon as they are trustworthy. Do not reveal partial tokens or stage artificial progress. Preserve finished work while the rest continues, and never make users wait for unrelated content before they can read.
 
-- Inherit the source element's readable color, size, weight, line height, alignment, and link style.
-- Use a system sans-serif fallback for translated CJK text; never introduce a serif translation font.
-- Keep each translation closer to its source than to the next source block.
-- Preserve semantic structure: headings, lists, tables, links, emphasis, code, and formulas.
-- Never change host grid tracks, width, display mode, or table-cell layout.
-- Put compact loading feedback exactly where the translation will appear.
-- Show complete passages as each model batch finishes. Do not reveal tokens or replay already-complete paragraphs one by one.
-- Keep model failures out of page content; explain recovery in the popup.
+### Failure is local and recoverable
 
-## YouTube Subtitles
+A failure should explain what stopped, retain completed work, and offer a clear next step. Do not scar the source page with diagnostic styling, erase useful results, or require a reload when a retry can recover.
 
-YouTube is the only supported video surface for now.
+### Defaults carry the product
 
-- Put the Transly control beside YouTube's controls in its own button boundary.
-- Keep subtitles centered near the lower safe area and above visible player controls.
-- Support source only, translation only, and bilingual display.
-- In bilingual mode, support source-first and translation-first order.
-- Let users adjust source size, translation size, vertical position, and scrim opacity independently using explicit pixel values where applicable.
-- The player entry point may use the Transly mark; subtitle text and scrim must remain unbranded.
+The common path should work without understanding providers, protocols, typography, or layout mechanics. Add controls only when user intent or viewing conditions genuinely differ. Keep advanced configuration available but subordinate.
 
-## Product Feedback
+### One surface, one next action
 
-- Use inline feedback instead of toasts or red outlines injected into the page.
-- Preserve a retry path after provider failures without requiring a page reload.
-- Keep controls stable in size across idle, loading, success, and error states.
+Every state should make the next useful action obvious. Visual hierarchy follows user intent: one primary action, supporting choices, then diagnostics. Stable placement matters more than novelty.
+
+### Readability beats visual fidelity
+
+Respect the source style until it harms translation readability. When scripts, line lengths, contrast, or video composition create a conflict, choose comfortable reading while preserving the source's hierarchy and tone.
+
+## Review Questions
+
+Before shipping a design change, ask:
+
+- Does it improve reading, watching, or recovery rather than merely expose implementation?
+- Does the translation still belong to the source while remaining easy to distinguish?
+- Is yellow reserved for the most consequential action?
+- Can users understand the current state and recover without losing completed work?
+- Is every new setting necessary, or should a better default remove it?
+- Would this principle still make sense if the component library, provider, or supported site changed?
