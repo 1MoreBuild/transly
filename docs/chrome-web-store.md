@@ -177,12 +177,12 @@ One-time Google setup:
 First-item bootstrap:
 
 1. Run `npm run package`. The generated Chrome Web Store ZIP intentionally
-   omits `manifest.key`; the source manifest keeps the Web Store public key so
+   omits `manifest.key`; `extension.manifest.mjs` keeps the Web Store public key so
    unpacked builds use the production extension ID.
 2. Upload the generated `dist/transly-<version>.zip` manually as an unpublished
    draft.
 3. Copy the Chrome Web Store public key and item ID from the Dashboard.
-4. Replace `manifest.json`'s local key with the Web Store public key.
+4. Replace `extension.manifest.mjs`'s local key with the Web Store public key.
 5. Confirm the unpacked extension ID derived from that key equals the Dashboard
    item ID.
 6. Add the verified production ID to Lane's explicit Native Messaging
@@ -192,7 +192,7 @@ First-item bootstrap:
 
 Release flow:
 
-1. Bump `manifest.json` and `package.json` to the same version.
+1. Bump `package.json`; WXT writes that version into the generated manifest.
 2. Push a matching tag such as `v0.1.0`.
 3. The workflow installs Chromium, runs unit tests and real-extension E2E
    journeys against a deterministic local provider, then packages and uploads

@@ -16,9 +16,10 @@
   <img src="marketing/chrome-web-store/transly-article-bilingual-2560x1600.png" alt="Transly translating a web article in bilingual mode" width="100%">
 </p>
 
-Transly is an open-source Chrome extension for high-quality article
-translation. It gives the model broader document context instead of translating
-isolated fragments, then places each translation back into the original page.
+Transly is an open-source Chrome extension for high-quality article and video
+subtitle translation. It gives the model broader context instead of translating
+isolated fragments, then places each translation back into the original page or
+video.
 
 ## Why Transly
 
@@ -27,6 +28,12 @@ isolated fragments, then places each translation back into the original page.
 - Preserves links, lists, tables, code, formulas, and page hierarchy.
 - Shows complete translated passages as each model batch finishes.
 - Supports bilingual and translation-only reading modes.
+- Translates YouTube timedtext, WebVTT, and native browser subtitle tracks in a
+  bilingual video overlay. YouTube players get a
+  direct subtitle toggle and controls for original, translated, or bilingual
+  display; bilingual line order; separate text sizes; position; and background
+  opacity. Adjacent timed cues are translated as semantic groups, then aligned
+  back to their original playback slots.
 - Works with the OpenAI-compatible model service you choose.
 
 ## Get Started
@@ -35,10 +42,13 @@ isolated fragments, then places each translation back into the original page.
 
 ```bash
 git clone https://github.com/1MoreBuild/transly.git
+cd transly
+npm install
+npm run build
 ```
 
 Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**,
-and select the cloned `transly` folder.
+and select the generated `dist/extension` folder.
 
 <details>
 <summary><strong>Install with a coding agent</strong></summary>
@@ -51,9 +61,9 @@ Use the current checkout if it is Transly; otherwise clone it into a `transly`
 folder in the current workspace without asking me for a path. Read AGENTS.md,
 run the test suite, and do not make product changes during installation.
 
-When ready, give me the exact repository root to select in Chrome. Tell me to
+When ready, give me the exact `dist/extension` folder to select in Chrome. Tell me to
 open chrome://extensions, enable Developer mode, choose Load unpacked, and select
-that folder. Do not send a real model request without asking first.
+that generated folder. Do not send a real model request without asking first.
 ```
 
 </details>
@@ -72,9 +82,9 @@ See [Provider Setup](docs/providers.md) for details.
 
 ## Product Scope
 
-Article translation is the primary product. Video subtitle translation is an
-early beta. PDF, EPUB, OCR, image translation, and input-box translation are not
-supported.
+Article translation is the primary product. YouTube subtitle translation is in
+beta; live speech recognition and other video sites are not included. PDF,
+EPUB, OCR, image translation, and input-box translation are not supported.
 
 ## Transly And Immersive Translate
 
@@ -102,9 +112,14 @@ npm test
 npm run package
 ```
 
-`npm test` runs focused unit coverage and product-level Playwright E2E against
-the real unpacked extension. The E2E suite uses a local deterministic model
-service; it does not send real model requests. More documentation:
+WXT owns the manifest, service-worker bundle, and React popup/settings
+entrypoints. `npm run dev` starts its development build; `npm run build`
+generates the unpacked extension in `dist/extension`.
+
+`npm test` runs TypeScript checks, focused unit coverage, and product-level
+Playwright E2E against the generated extension. The E2E suite uses a local
+deterministic model service; it does not send real model requests. More
+documentation:
 
 - [Provider setup](docs/providers.md)
 - [Architecture](docs/architecture.md)

@@ -5,6 +5,12 @@ OpenAI-compatible API without a companion process. When Lane is installed,
 Transly can obtain its local connection automatically through Chrome Native
 Messaging.
 
+[WXT](https://wxt.dev/) generates the extension manifest and bundles the
+service worker, React popup, and React settings page. The popup and settings
+use [Base UI](https://base-ui.com/) primitives for accessible selects and
+comboboxes. The established article and subtitle runtimes remain ordered
+classic content scripts copied into the WXT build unchanged.
+
 ```mermaid
 flowchart LR
   Popup["Popup and settings"] --> BG["Extension service worker"]
@@ -31,15 +37,15 @@ The user supplies an API URL, model name, optional API key, and optional protoco
 
 Remote provider URLs must use HTTPS. Plain HTTP is accepted only for `localhost`, `127.0.0.1`, and `::1` so a separately operated local proxy remains possible.
 
-The settings page can discover compatible services on a fixed set of loopback ports. Discovery is started only by an explicit user action, does not enumerate the network, and sends no stored API key. Model names are then read from the selected provider's `/models` endpoint and shown in a native dropdown; manual model entry remains a fallback.
+The settings page can discover compatible services on a fixed set of loopback ports. Discovery is started only by an explicit user action, does not enumerate the network, and sends no stored API key. Model names are then read from the selected provider's `/models` endpoint and shown in a searchable combobox; manual model entry remains a fallback.
 
 If no provider is configured, the service worker first asks the registered Lane
 Native Messaging host for a connection. Chrome and Lane both restrict this path
 to Transly's stable extension ID. Lane returns its loopback URL, client key, and
 public model IDs; provider OAuth tokens and upstream API keys remain in Lane.
 
-The source manifest uses the verified Chrome Web Store public key so unpacked
-builds and Store installs share the same extension ID. Lane must explicitly
+`extension.manifest.mjs` keeps the verified Chrome Web Store public key so WXT
+development builds and Store installs share the same extension ID. Lane must explicitly
 allow that production ID; neither side may use a wildcard origin.
 Failure is silent and falls back to the normal configuration page. Explicitly
 choosing **Connect Lane** can replace an existing provider configuration.
@@ -63,7 +69,7 @@ Validated translation and audit results are cached in Chrome Cache Storage for 3
 
 ## Product Baseline
 
-Playwright loads the real unpacked Manifest V3 extension in its bundled
+Playwright builds and loads the generated unpacked Manifest V3 extension in its bundled
 Chromium and drives the settings page, popup, service worker, content scripts,
 and translated DOM as a user would. A deterministic loopback provider supplies
 model discovery and streamed Responses output without making a real model
