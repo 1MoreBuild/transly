@@ -58,7 +58,7 @@ components:
 
 This file records decisions unique to Transly. Do not expand it into a general UI handbook.
 
-For general interface craft, use the `emil-design-eng` and `apple-design` skills when available. Use the `prototype` skill for divergent visual exploration. Existing project conventions remain the fallback when those skills are unavailable.
+For general interface craft, use [`emil-design-eng`](https://github.com/emilkowalski/skills/tree/main/skills/emil-design-eng) and [`apple-design`](https://github.com/emilkowalski/skills/tree/main/skills/apple-design) when available. Use [`prototype`](https://github.com/emilkowalski/skills/tree/main/skills/prototype) for divergent visual exploration. Existing project conventions remain the fallback when those skills are unavailable.
 
 ## Brand Direction
 
