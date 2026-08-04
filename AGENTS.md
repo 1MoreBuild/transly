@@ -15,11 +15,13 @@ When asked to install Transly:
 
 ## Working On Transly
 
+- Use Node.js 24 LTS. The supported runtime is recorded in `.nvmrc` and `package.json`.
 - Translation quality is the primary product requirement. Preserve meaning, voice, terminology, links, and document structure.
 - Transly owns the browser translation experience: extraction, batching, prompts, validation, caching, and rendering. It does not own model hosting, provider authentication, billing, or proxy operation.
 - API keys stay in Chrome local extension storage and must never enter webpage code, logs, traces, or synced storage.
 - Remote API URLs must use HTTPS. Plain HTTP is allowed only for localhost.
 - Local discovery must remain user-triggered, limited to fixed loopback endpoints, and must not send stored credentials while probing.
+- Read `DESIGN.md` before changing any user-facing layout, styling, motion, or interaction.
 - Read `docs/architecture.md`, relevant source, and tests before changing behavior.
 - Preserve unrelated worktree changes and update focused documentation when behavior changes.
 
