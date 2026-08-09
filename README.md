@@ -1,15 +1,13 @@
 <div align="center">
   <img src="assets/transly-logo.png" width="112" alt="Transly logo">
   <h1>Transly</h1>
-  <p><strong>Read web articles in your language, without losing their context.</strong></p>
+  <p><strong>Context-aware AI translation for web articles and YouTube captions.</strong></p>
 
   <p>
     <a href="https://chromewebstore.google.com/detail/transly/mdjfkiddlpdgchddcckhcmdjekmmhcgp"><img src="https://img.shields.io/badge/Install_from-Chrome_Web_Store-4285F4?logo=googlechrome&logoColor=white" alt="Install Transly from the Chrome Web Store"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111" alt="MIT License"></a>
     <a href="PRIVACY.md"><img src="https://img.shields.io/badge/privacy-policy-111111" alt="Privacy Policy"></a>
     <a href="https://github.com/1MoreBuild/transly/actions/workflows/ci.yml"><img src="https://github.com/1MoreBuild/transly/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-    <img src="https://img.shields.io/badge/browser-Chrome-4285F4" alt="Chrome">
-    <img src="https://img.shields.io/badge/API-OpenAI%20compatible-FFC107" alt="OpenAI-compatible API">
   </p>
 </div>
 
@@ -17,71 +15,89 @@
   <img src="marketing/chrome-web-store/transly-article-bilingual-2560x1600.png" alt="Transly translating a web article in bilingual mode" width="100%">
 </p>
 
-Transly is an open-source Chrome extension for high-quality article and video
-subtitle translation. It gives the model broader context instead of translating
-isolated fragments, then places each translation back into the original page or
-video.
+Transly is an open-source Chrome extension that translates with a model service
+you choose. It sends related text together for better context, then places each
+translation back beside the original content.
 
-## Why Transly
+## What It Does
 
-- Shares broader article context with the model for more consistent terminology
-  and tone.
-- Preserves links, lists, tables, code, formulas, and page hierarchy.
-- Shows complete translated passages as each model batch finishes.
+### Article Translation
+
+- Translates article text in context instead of sending isolated sentences.
+- Shows finished passages progressively while the rest of the article continues.
 - Supports bilingual and translation-only reading modes.
-- Translates YouTube timedtext, WebVTT, and native browser subtitle tracks in a
-  bilingual video overlay. YouTube players get a
-  direct subtitle toggle and controls for original, translated, or bilingual
-  display; bilingual line order; separate text sizes; position; and background
-  opacity. Adjacent timed cues are translated as semantic groups, then aligned
-  back to their original playback slots.
-- Works with the OpenAI-compatible model service you choose.
+- Preserves document structure such as headings, links, lists, tables, code, and
+  formulas where the page exposes them as usable HTML.
+- Caches validated results locally to avoid repeating identical model requests.
+
+### YouTube Subtitles (Beta)
+
+- Translates existing YouTube captions from timed-text responses or native
+  browser caption tracks.
+- Prioritizes captions around the current playhead, then fills the rest in the
+  background.
+- Keeps translated cues available when you seek backward.
+- Supports original-only, translation-only, and bilingual display, plus line
+  order, text size, position, and background controls inside the player.
+- Uses available target-language captions directly instead of translating them
+  again.
+
+Transly does not transcribe audio. A YouTube video must already have a usable
+caption track. Other video sites are not supported in the current release.
 
 ## Get Started
 
-### 1. Install The Extension
+1. [Install Transly from the Chrome Web Store](https://chromewebstore.google.com/detail/transly/mdjfkiddlpdgchddcckhcmdjekmmhcgp).
+2. Connect a model service using one of the options below.
+3. Open an article and choose **Translate this article**, or use the Transly
+   control inside a YouTube player.
 
-[Install Transly from the official Chrome Web Store](https://chromewebstore.google.com/detail/transly/mdjfkiddlpdgchddcckhcmdjekmmhcgp),
-then pin it to the Chrome toolbar for quick access.
+### Use Lane On macOS
 
-### 2. Connect A Model
+[Lane](https://github.com/1MoreBuild/Lane) is the easiest local setup on macOS.
+It can connect ChatGPT / Codex through browser OAuth or use provider API keys,
+then exposes a private OpenAI-compatible endpoint on your Mac. Install and open
+Lane, add a provider, and Transly can discover its connection and models
+automatically.
 
-**Have a ChatGPT/Codex subscription?** Install
-[Lane](https://github.com/1MoreBuild/Lane) and sign in with ChatGPT. Transly
-detects Lane automatically and loads its available models.
+Lane is optional and maintained as a separate project.
 
-**Have an API endpoint?** Open **Configure** and enter any compatible API URL
-and key. Transly supports hosted APIs, self-hosted services, and local proxies
-such as [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
+### Use Your Own API
 
-See [Provider Setup](docs/providers.md) for details.
+Transly also connects directly to hosted APIs, self-hosted services, and local
+gateways. Configure:
 
-### 3. Translate
+- an OpenAI-compatible base URL or complete endpoint;
+- an API key when the service requires one;
+- a model returned by the service, or a model name entered manually;
+- Responses or Chat Completions format, normally left on **Auto detect**.
 
-Open an article and select **Translate this article** from the Transly popup. On
-YouTube, use the Transly control in the video player to translate subtitles.
+See [Provider Setup](docs/providers.md) for supported URL formats, local service
+discovery, and security guidance.
 
-## Product Scope
+## Privacy And Boundaries
 
-Article translation is the primary product. YouTube subtitle translation is
-available and working. The subtitle feature remains in beta; live speech
-recognition and other video sites are not included. PDF, EPUB, OCR, image
-translation, and input-box translation are not supported.
+Transly has no hosted translation backend. Article or caption text is sent from
+the extension to the model service you configure. Provider settings stay in
+Chrome's local extension storage and are not synchronized through Chrome Sync.
+
+Your provider controls authentication, retention, billing, rate limits, uptime,
+and model behavior. Use a service you trust. See the [Privacy Policy](PRIVACY.md)
+for the complete data-handling description.
+
+Transly focuses on web articles and YouTube captions. It does not currently
+translate PDFs, EPUBs, images, input boxes, or live speech.
 
 ## Transly And Immersive Translate
 
-[Immersive Translate](https://immersivetranslate.com/) is the closest product
-reference for Transly. The two products make different tradeoffs:
+[Immersive Translate](https://immersivetranslate.com/) is an important product
+reference for Transly. Immersive Translate supports many more formats, sites,
+and translation services. Transly deliberately has a narrower scope and puts
+more article context into each model request to improve long-form terminology,
+tone, and coherence.
 
-| | Transly | Immersive Translate |
-| --- | --- | --- |
-| Primary focus | High-context article translation | Translation across many formats and platforms |
-| Model access | User-configured OpenAI-compatible endpoint | Built-in and custom translation services |
-| Scope | Articles; video subtitles in beta | Websites, PDFs, EPUBs, images, subtitles, input boxes, and more |
-
-Transly's larger-context approach is designed to improve terminology, tone, and
-long-form coherence. Translation quality still depends on the configured model
-and has not yet been measured in a published benchmark.
+Translation quality still depends on the page, source language, configured
+model, and provider. Transly has not published a comparative quality benchmark.
 
 ## Development
 
@@ -94,15 +110,17 @@ npm test
 npm run package
 ```
 
-WXT owns the manifest, service-worker bundle, and React popup/settings
-entrypoints. `npm run dev` starts its development build; `npm run build`
-generates the unpacked extension in `dist/extension`.
+Transly uses [WXT](https://wxt.dev/) with React for the popup and settings UI.
+`npm run dev` starts a development build, while `npm run build` writes the
+unpacked extension to `dist/extension`.
 
-`npm test` runs TypeScript checks, focused unit coverage, and product-level
-Playwright E2E against the generated extension. The E2E suite uses a local
-deterministic model service; it does not send real model requests. More
-documentation:
+`npm test` runs TypeScript checks, unit tests, and Playwright product journeys
+against the real generated extension and a deterministic local model service.
+It does not send real model requests.
 
+Further documentation:
+
+- [Changelog](CHANGELOG.md)
 - [Provider setup](docs/providers.md)
 - [Architecture](docs/architecture.md)
 - [Chrome Web Store release](docs/chrome-web-store.md)
@@ -112,10 +130,8 @@ documentation:
 Transly owes a substantial design debt to
 [Immersive Translate](https://immersivetranslate.com/). Its bilingual reading
 experience and DOM-aware translation approach informed many product and
-engineering decisions.
-
-Transly is an independent implementation and is not affiliated with or endorsed
-by Immersive Translate.
+engineering decisions. Transly is an independent implementation and is not
+affiliated with or endorsed by Immersive Translate.
 
 ## License
 
