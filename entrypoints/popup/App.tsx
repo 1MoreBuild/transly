@@ -1,5 +1,5 @@
 import { Select } from "@base-ui/react/select";
-import { Check, ChevronDown, Languages, LoaderCircle, Settings2 } from "lucide-react";
+import { ArrowLeftRight, Check, ChevronDown, LoaderCircle, Settings2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   filterTranslationModels,
@@ -154,7 +154,8 @@ export function App() {
     try {
       const response = await sendToActiveTab({
         type: "TRANSLY_TRANSLATE_ARTICLE",
-        targetLanguage
+        targetLanguage,
+        articleDisplayMode: displayMode
       }, sourceTabId);
       if (response?.ok === false) throw new Error(response.error || "Translation failed");
       setTimeout(() => window.close(), 240);
@@ -170,8 +171,11 @@ export function App() {
   }, [model, models]);
   const running = articleStatus === "running";
   const primaryLabel = running
-    ? "Translation in progress"
-    : hasTranslation ? "Restore original" : "Translate this article";
+    ? "Translating..."
+    : hasTranslation ? "Restore" : "Translate";
+  const primaryAriaLabel = running
+    ? "Article translation in progress"
+    : hasTranslation ? "Restore original article" : "Translate this article";
   const providerIcon = provider.provider?.icon
     ? chrome.runtime.getURL(provider.provider.icon)
     : "";
@@ -186,7 +190,13 @@ export function App() {
             <Select.Icon className="select-chevron"><ChevronDown size={16} /></Select.Icon>
           </Select.Trigger>
           <Select.Portal>
-            <Select.Positioner className="select-positioner" align="end" sideOffset={6}>
+            <Select.Positioner
+              className="select-positioner"
+              align="end"
+              alignItemWithTrigger={false}
+              collisionPadding={8}
+              sideOffset={6}
+            >
               <Select.Popup className="select-popup language-popup">
                 <Select.List className="select-list">
                   {TARGET_LANGUAGES.map((language) => (
@@ -229,7 +239,13 @@ export function App() {
                 : <Select.Icon className="select-chevron"><ChevronDown size={15} /></Select.Icon>}
             </Select.Trigger>
             <Select.Portal>
-              <Select.Positioner className="select-positioner" align="start" sideOffset={7}>
+              <Select.Positioner
+                className="select-positioner"
+                align="start"
+                alignItemWithTrigger={false}
+                collisionPadding={8}
+                sideOffset={7}
+              >
                 <Select.Popup className="select-popup model-popup">
                   <Select.List id="popupModelList" className="select-list">
                     {modelItems.map((item) => {
@@ -288,7 +304,11 @@ export function App() {
               title={displayMode === "bilingual" ? "Switch to translation only" : "Switch to bilingual view"}
               onClick={toggleDisplayMode}
             >
-              <Languages size={19} />
+              <span className="display-mode-glyph" aria-hidden="true">
+                {displayMode === "bilingual" ? "文A" : "文"}
+              </span>
+              <span>{displayMode === "bilingual" ? "Bilingual" : "Translation"}</span>
+              <ArrowLeftRight className="display-mode-swap" size={13} aria-hidden="true" />
             </button>
           )}
           <button
@@ -297,6 +317,7 @@ export function App() {
             type="button"
             disabled={running || (!hasTranslation && !providerConfigured)}
             aria-busy={running}
+            aria-label={primaryAriaLabel}
             onClick={runPrimaryAction}
           >
             {running && <LoaderCircle className="spin" size={17} />}

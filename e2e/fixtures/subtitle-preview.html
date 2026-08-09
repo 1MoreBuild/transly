@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Transly E2E YouTube Preview</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111318; }
+      ytd-rich-item-renderer, ytd-video-preview { position: relative; display: block; width: min(720px, 80vw); }
+      .html5-video-player { position: relative; width: 100%; }
+      video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #222631; }
+      #player-controls { position: absolute; inset: 0; pointer-events: none; }
+      yt-inline-player-controls { position: absolute; right: 14px; top: 18px; display: flex; flex-direction: column; gap: 8px; }
+      yt-closed-captions-toggle-button { display: block; width: 40px; height: 40px; }
+      yt-closed-captions-toggle-button button { width: 40px; height: 40px; border: 0; border-radius: 50%; color: #fff; background: rgba(0,0,0,.62); pointer-events: auto; }
+    </style>
+  </head>
+  <body>
+    <main id="preview-root"></main>
+    <script>
+      function renderPreview(active = false, videoId = "preview-video", title = "How thoughtful tools improve creative work") {
+        document.querySelector("#preview-root").innerHTML = `
+          <ytd-rich-item-renderer>
+            <ytd-video-preview ${active ? "active playing" : ""}>
+              <a id="media-container-link" href="/watch?v=${videoId}"></a>
+              <div id="inline-preview-player" class="html5-video-player">
+                <video id="player" aria-label="YouTube hover preview" src="/subtitle.mp4" muted autoplay loop>
+                  <track kind="subtitles" srclang="en" label="English" src="/captions.vtt" default>
+                </video>
+              </div>
+              <div id="player-controls">
+                <yt-inline-player-controls>
+                  <yt-closed-captions-toggle-button>
+                    <button class="ytmClosedCaptioningButtonButton" type="button" aria-pressed="true">CC</button>
+                  </yt-closed-captions-toggle-button>
+                </yt-inline-player-controls>
+              </div>
+            </ytd-video-preview>
+            <a id="video-title" title="${title}">${title}</a>
+            <ytd-channel-name><a>Transly Research</a></ytd-channel-name>
+          </ytd-rich-item-renderer>
+        `;
+      }
+      renderPreview(false);
+      window.setPreviewState = (active) => {
+        const preview = document.querySelector("ytd-video-preview");
+        preview.toggleAttribute("active", active);
+        preview.toggleAttribute("playing", active);
+      };
+      window.rebuildPreview = (active = true) => {
+        renderPreview(active);
+      };
+      window.switchPreviewVideo = (videoId, title) => {
+        renderPreview(true, videoId, title);
+      };
+    </script>
+  </body>
+</html>

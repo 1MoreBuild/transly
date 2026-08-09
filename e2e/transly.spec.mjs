@@ -2,14 +2,87 @@ import {
   configureProvider,
   expect,
   openDisabledTextTrackPage,
+  openLongSubtitlePage,
   openArticle,
   openSemanticSubtitlePage,
   openSubtitlePage,
+  openTargetSubtitlePage,
   openTextTrackPage,
   openTriggeredSubtitlePage,
+  openSubtitlePreviewPage,
   openPopup,
   test
 } from "./support/extension-fixture.mjs";
+
+async function setPlayerSubtitles(page, enabled) {
+  const controls = page.locator("#transly-subtitle-controls");
+  const menuTrigger = controls.locator(".menu-trigger");
+  const subtitleSwitch = controls.locator(".subtitle-switch");
+  await menuTrigger.click();
+  await expect(controls.locator(".panel")).toBeVisible();
+  if ((await subtitleSwitch.getAttribute("aria-checked")) !== String(enabled)) {
+    await subtitleSwitch.click();
+  }
+  await expect(subtitleSwitch).toHaveAttribute("aria-checked", String(enabled));
+  await menuTrigger.click();
+  await expect(controls.locator(".panel")).toBeHidden();
+}
+
+test("an active YouTube preview gets a cached Transly control below CC", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  const { page: videoPage } = await openSubtitlePreviewPage(extension, provider);
+
+  await videoPage.waitForTimeout(250);
+  await expect(videoPage.locator("#transly-subtitle-controls")).toHaveCount(0);
+
+  await videoPage.evaluate(() => window.setPreviewState(true));
+  const controls = videoPage.locator("#transly-subtitle-controls");
+  await expect(controls).toBeVisible();
+  await expect(controls).toHaveAttribute("data-context", "preview");
+  const controlBox = await controls.boundingBox();
+  const ccBox = await videoPage.locator("yt-closed-captions-toggle-button").boundingBox();
+  expect(controlBox.y).toBeGreaterThan(ccBox.y + ccBox.height);
+  expect(Math.abs((controlBox.x + controlBox.width / 2) - (ccBox.x + ccBox.width / 2))).toBeLessThan(2);
+
+  await controls.locator(".menu-trigger").click();
+  await expect(videoPage.locator("html")).toHaveAttribute("data-transly-subtitles-enabled", "true");
+  await expect(videoPage.locator("#transly-caption-window")).toContainText("视频中的第一句字幕。");
+  await expect.poll(() => provider.translationRequests().length).toBe(1);
+  const prompt = provider.translationRequests()[0].prompt;
+  const [contextSection, translationSection] = prompt.split("TEXT TO TRANSLATE");
+  expect(contextSection).toContain("Title: How thoughtful tools improve creative work");
+  expect(contextSection).toContain("Channel: Transly Research");
+  expect(translationSection).not.toContain("How thoughtful tools improve creative work");
+  expect(translationSection).not.toContain("Transly Research");
+
+  await videoPage.evaluate(() => window.setPreviewState(false));
+  await expect(controls).toBeHidden();
+  await expect(videoPage.locator("#transly-caption-window")).toBeHidden();
+
+  await videoPage.evaluate(() => window.rebuildPreview(true));
+  await expect(controls).toBeVisible();
+  await expect(videoPage.locator("#transly-caption-window")).toContainText("视频中的第一句字幕。");
+  await videoPage.waitForTimeout(350);
+  expect(provider.translationRequests()).toHaveLength(1);
+
+  await videoPage.evaluate(() => window.switchPreviewVideo(
+    "second-preview-video",
+    "A different video with the same opening captions"
+  ));
+  await expect(controls).toBeVisible();
+  await expect(videoPage.locator("#transly-caption-window")).toContainText("视频中的第一句字幕。");
+  await expect.poll(() => provider.translationRequests().length).toBe(2);
+  expect(provider.translationRequests()[1].prompt).toContain("A different video with the same opening captions");
+
+  await videoPage.reload();
+  await videoPage.evaluate(() => window.setPreviewState(true));
+  await expect(videoPage.locator("#transly-caption-window")).toContainText("视频中的第一句字幕。");
+  await videoPage.waitForTimeout(350);
+  expect(provider.translationRequests()).toHaveLength(2);
+});
 
 test("a viewer enables bilingual subtitles, follows playback, and keeps them across reloads", async ({
   extension,
@@ -19,7 +92,7 @@ test("a viewer enables bilingual subtitles, follows playback, and keeps them acr
   const { page: videoPage } = await openSubtitlePage(extension, provider);
   await expect.poll(() => videoPage.locator("video").evaluate((video) => video.readyState)).toBeGreaterThan(0);
   await videoPage.evaluate(() => window.setSubtitleTime(1));
-  await videoPage.locator("#transly-subtitle-controls .toggle").click();
+  await setPlayerSubtitles(videoPage, true);
   await expect(videoPage.locator("html")).toHaveAttribute("data-transly-subtitle-status", "ready");
   await expect(videoPage.locator("#transly-caption-window")).toContainText("First caption from the video.");
   await expect(videoPage.locator("#transly-caption-window")).toContainText("视频中的第一句字幕。");
@@ -33,7 +106,7 @@ test("a viewer enables bilingual subtitles, follows playback, and keeps them acr
   await expect(videoPage.locator("#transly-caption-window")).toContainText("视频中的第一句字幕。");
   expect(provider.translationRequests()).toHaveLength(1);
 
-  await videoPage.locator("#transly-subtitle-controls .toggle").click();
+  await setPlayerSubtitles(videoPage, false);
   await expect(videoPage.locator("#transly-caption-window")).toHaveCount(0);
   await expect(videoPage.locator("html")).toHaveAttribute("data-transly-subtitles-enabled", "false");
 });
@@ -45,7 +118,7 @@ test("subtitle translation keeps a complete utterance together and preserves tim
   await configureProvider(extension, provider);
   const { page: videoPage } = await openSemanticSubtitlePage(extension, provider);
 
-  await videoPage.locator("#transly-subtitle-controls .toggle").click();
+  await setPlayerSubtitles(videoPage, true);
   await expect(videoPage.locator("html")).toHaveAttribute("data-transly-subtitle-status", "ready");
 
   const request = provider.translationRequests().at(-1);
@@ -64,13 +137,100 @@ test("a viewer gets bilingual subtitles from a native TextTrack without a fetch 
   const { page: videoPage } = await openTextTrackPage(extension, provider);
   await expect.poll(() => videoPage.locator("video").evaluate((video) => video.readyState)).toBeGreaterThan(0);
   await videoPage.evaluate(() => window.setSubtitleTime(1));
-  await videoPage.locator("#transly-subtitle-controls .toggle").click();
+  await setPlayerSubtitles(videoPage, true);
   await expect(videoPage.locator("html")).toHaveAttribute("data-transly-subtitle-status", "ready");
   await expect(videoPage.locator("#transly-caption-window")).toContainText("视频中的第一句字幕。");
   await expect.poll(() => videoPage.locator("video").evaluate((video) => video.textTracks[0]?.mode)).toBe("hidden");
 
-  await videoPage.locator("#transly-subtitle-controls .toggle").click();
+  await setPlayerSubtitles(videoPage, false);
   await expect.poll(() => videoPage.locator("video").evaluate((video) => video.textTracks[0]?.mode)).toBe("showing");
+});
+
+test("target-language captions stay native and never call the translation model", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  const { page: videoPage } = await openTargetSubtitlePage(extension, provider);
+  await expect.poll(() => videoPage.locator("video").evaluate((video) => video.readyState)).toBeGreaterThan(0);
+  await videoPage.evaluate(() => window.setSubtitleTime(1));
+
+  await setPlayerSubtitles(videoPage, true);
+
+  await expect(videoPage.locator("html")).toHaveAttribute("data-transly-subtitle-status", "native");
+  await expect(videoPage.locator("html")).toHaveAttribute("data-transly-subtitle-source-language", "zh");
+  await expect(videoPage.locator("html")).toHaveAttribute("data-transly-subtitle-skip-reason", "source-matches-target");
+  await expect.poll(() => videoPage.locator("video").evaluate((video) => video.textTracks[0]?.mode)).toBe("showing");
+  await expect(videoPage.locator("#transly-caption-window")).toBeHidden();
+  expect(provider.translationRequests()).toHaveLength(0);
+
+  const diagnostics = await extension.context.newPage();
+  await diagnostics.goto(`chrome-extension://${extension.extensionId}/options.html?debug=1`);
+  await expect(diagnostics.locator(".debug-panel")).toBeVisible();
+  await expect(diagnostics.locator(".debug-event").first()).toContainText("native");
+  await expect(diagnostics.locator(".debug-event").first()).toContainText("source-matches-target");
+  await diagnostics.close();
+
+  const normalOptions = await extension.context.newPage();
+  await normalOptions.goto(`chrome-extension://${extension.extensionId}/options.html`);
+  await expect(normalOptions.locator(".debug-panel")).toHaveCount(0);
+  await normalOptions.close();
+
+  await videoPage.evaluate(() => window.switchToSourceCaptions());
+  await expect(videoPage.locator("#transly-caption-window")).toContainText("视频中的第一句字幕。");
+  await expect(videoPage.locator("html")).toHaveAttribute("data-transly-subtitle-status", "ready");
+  await expect.poll(() => provider.translationRequests().length).toBe(1);
+});
+
+test("subtitle failures expose the error only in hidden diagnostics", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  provider.state.failNextTranslation = true;
+  const { page: videoPage } = await openTextTrackPage(extension, provider);
+  await expect.poll(() => videoPage.locator("video").evaluate((video) => video.readyState)).toBeGreaterThan(0);
+  await videoPage.evaluate(() => window.setSubtitleTime(1));
+
+  await setPlayerSubtitles(videoPage, true);
+
+  await expect(videoPage.locator("html")).toHaveAttribute("data-transly-subtitle-status", "error");
+  const controlState = await videoPage.locator("#transly-subtitle-controls").evaluate((node) => {
+    const statusDot = node.shadowRoot.querySelector(".status-dot");
+    const trigger = node.shadowRoot.querySelector(".menu-trigger");
+    return {
+      dotColor: getComputedStyle(statusDot).backgroundColor,
+      title: trigger.title
+    };
+  });
+  expect(controlState.dotColor).toBe("rgb(239, 68, 68)");
+  expect(controlState.title).toContain("Planned provider outage");
+
+  const diagnostics = await extension.context.newPage();
+  await diagnostics.goto(`chrome-extension://${extension.extensionId}/options.html?debug=1`);
+  const latestEvent = diagnostics.locator(".debug-event").first();
+  await expect(latestEvent).toContainText("error");
+  await expect(latestEvent).toContainText("Planned provider outage");
+});
+
+test("partial subtitle failures remain visible in hidden diagnostics", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  provider.state.failTranslationNumber = 2;
+  const { page: videoPage } = await openLongSubtitlePage(extension, provider);
+  await videoPage.evaluate(() => window.setSubtitleTime(600));
+  await videoPage.locator(".html5-video-player").evaluate((node) => node.classList.remove("ytp-autohide"));
+  await setPlayerSubtitles(videoPage, true);
+
+  await expect(videoPage.locator("#transly-caption-window")).toContainText("长视频第 11 句。");
+  await expect.poll(() => provider.translationRequests().length).toBeGreaterThanOrEqual(2);
+
+  const diagnostics = await extension.context.newPage();
+  await diagnostics.goto(`chrome-extension://${extension.extensionId}/options.html?debug=1`);
+  await expect(diagnostics.locator(".debug-event").first()).toContainText("Last error");
+  await expect(diagnostics.locator(".debug-event").first()).toContainText("Planned provider outage");
 });
 
 test("enabling subtitles triggers a player caption request when captions start off", async ({
@@ -81,8 +241,9 @@ test("enabling subtitles triggers a player caption request when captions start o
   const { page: videoPage } = await openTriggeredSubtitlePage(extension, provider);
   await expect(videoPage.locator(".ytp-subtitles-button")).toHaveAttribute("aria-pressed", "false");
   await videoPage.evaluate(() => window.setSubtitleTime(1));
+  await videoPage.locator(".html5-video-player").evaluate((node) => node.classList.remove("ytp-autohide"));
 
-  await videoPage.locator("#transly-subtitle-controls .toggle").click();
+  await setPlayerSubtitles(videoPage, true);
 
   await expect(videoPage.locator(".ytp-subtitles-button")).toHaveAttribute("aria-pressed", "true");
   await expect(videoPage.locator("#transly-caption-window")).toContainText("视频中的第一句字幕。");
@@ -99,10 +260,18 @@ test("a viewer controls translated subtitles and their appearance inside the pla
   await videoPage.evaluate(() => window.setSubtitleTime(1));
 
   const controls = videoPage.locator("#transly-subtitle-controls");
+  await expect(controls).toBeHidden();
+  await videoPage.locator(".html5-video-player").evaluate((node) => node.classList.remove("ytp-autohide"));
+  await expect(controls).toBeVisible();
   await expect(controls).toHaveAttribute("data-placement", "floating");
-  await expect(controls.locator(".toggle")).toHaveAttribute("aria-label", "Turn on translated subtitles");
+  await expect(controls.locator(".menu-trigger")).toHaveAttribute("aria-label", "Transly subtitle settings");
+  await expect(controls.locator(".menu-trigger")).toHaveAttribute("aria-expanded", "false");
   await expect(controls.locator(".brand-icon")).toHaveAttribute("src", /transly-player\.svg$/);
   await expect.poll(() => controls.evaluate((node) => node.parentElement === document.documentElement)).toBe(true);
+  await expect.poll(() => controls.evaluate((node) => ({
+    width: Math.round(node.getBoundingClientRect().width),
+    height: Math.round(node.getBoundingClientRect().height)
+  }))).toEqual({ width: 52, height: 36 });
   await expect.poll(() => videoPage.evaluate(() => {
     const controlsRect = document.querySelector("#transly-subtitle-controls").getBoundingClientRect();
     const youtubeControlsRect = document.querySelector(".ytp-right-controls").getBoundingClientRect();
@@ -114,29 +283,57 @@ test("a viewer controls translated subtitles and their appearance inside the pla
       ))
     };
   })).toEqual({ gap: 8, centerDelta: 0 });
-  await controls.locator(".toggle").click();
+  await expect.poll(() => controls.evaluate((node) => {
+    const surface = getComputedStyle(node.shadowRoot.querySelector(".control"));
+    return {
+      borderRadius: surface.borderRadius,
+      backgroundColor: surface.backgroundColor
+    };
+  })).toEqual({ borderRadius: "18px", backgroundColor: "rgba(0, 0, 0, 0.5)" });
+  await setPlayerSubtitles(videoPage, true);
 
   await expect(videoPage.locator(".ytp-subtitles-button")).toHaveAttribute("aria-pressed", "true");
   await expect(videoPage.locator("#transly-caption-window")).toContainText("视频中的第一句字幕。");
   await expect(controls).toHaveAttribute("data-state", "ready");
-  await expect(controls.locator(".toggle")).toHaveAttribute("aria-label", "Turn off translated subtitles");
+  await expect(controls).toHaveAttribute("data-enabled", "true");
+  await expect.poll(() => controls.evaluate((node) => {
+    const mark = getComputedStyle(node.shadowRoot.querySelector(".status-dot"));
+    return {
+      width: mark.width,
+      height: mark.height,
+      backgroundColor: mark.backgroundColor,
+      borderRightColor: mark.borderRightColor,
+      borderBottomColor: mark.borderBottomColor
+    };
+  })).toEqual({
+    width: "7px",
+    height: "4px",
+    backgroundColor: "rgba(0, 0, 0, 0)",
+    borderRightColor: "rgb(34, 197, 94)",
+    borderBottomColor: "rgb(34, 197, 94)"
+  });
 
   const caption = videoPage.locator("#transly-caption-window");
+  await videoPage.locator(".html5-video-player").evaluate((node) => node.classList.add("ytp-autohide"));
+  await expect(controls).toBeHidden();
   await expect.poll(() => videoPage.evaluate(() => {
     const videoRect = document.querySelector("video").getBoundingClientRect();
     const captionRect = document.querySelector("#transly-caption-window").getBoundingClientRect();
     return Math.round(videoRect.bottom - captionRect.bottom);
   })).toBe(32);
   await videoPage.locator(".html5-video-player").evaluate((node) => node.classList.remove("ytp-autohide"));
+  await expect(controls).toBeVisible();
   await expect.poll(() => videoPage.evaluate(() => {
     const videoRect = document.querySelector("video").getBoundingClientRect();
     const captionRect = document.querySelector("#transly-caption-window").getBoundingClientRect();
     return Math.round(videoRect.bottom - captionRect.bottom);
   })).toBeGreaterThan(79);
-  await videoPage.locator(".html5-video-player").evaluate((node) => node.classList.add("ytp-autohide"));
-
-  await controls.locator(".appearance").click();
+  await controls.locator(".menu-trigger").click();
   await expect(controls.locator(".panel")).toBeVisible();
+  await expect.poll(() => videoPage.evaluate(() => ({
+    controls: Number(getComputedStyle(document.querySelector("#transly-subtitle-controls")).zIndex),
+    caption: Number(getComputedStyle(document.querySelector("#transly-caption-window")).zIndex)
+  }))).toEqual({ controls: 2147483647, caption: 2147483646 });
   await controls.locator('[data-order="translation-first"]').click();
   await controls.locator('[data-setting="subtitleSourceFontSizePx"]').fill("22");
   await controls.locator('[data-setting="subtitleTranslationFontSizePx"]').fill("34");
@@ -172,9 +369,45 @@ test("a viewer controls translated subtitles and their appearance inside the pla
   await expect(videoPage.locator("#transly-caption-window")).toHaveAttribute("data-language-order", "translation-first");
   await expect(videoPage.locator("#transly-subtitle-controls")).toHaveAttribute("data-enabled", "true");
 
-  await videoPage.locator("#transly-subtitle-controls .toggle").click();
+  await videoPage.locator(".html5-video-player").evaluate((node) => node.classList.remove("ytp-autohide"));
+  await setPlayerSubtitles(videoPage, false);
   await expect(videoPage.locator("#transly-caption-window")).toHaveCount(0);
   await expect(videoPage.locator("#transly-subtitle-controls")).toHaveAttribute("data-enabled", "false");
+});
+
+test("long subtitles translate around the playhead and remain available after seeking back", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  const { page: videoPage } = await openLongSubtitlePage(extension, provider);
+  await videoPage.evaluate(() => window.setSubtitleTime(600));
+  await expect.poll(() => videoPage.locator("video").evaluate((video) => video.currentTime)).toBe(600);
+  await videoPage.locator(".html5-video-player").evaluate((node) => node.classList.remove("ytp-autohide"));
+  await setPlayerSubtitles(videoPage, true);
+
+  await expect(videoPage.locator("#transly-caption-window")).toContainText("长视频第 11 句。");
+  await expect.poll(() => provider.translationRequests().length).toBe(2);
+  const firstTranslationInput = provider.translationRequests()[0].prompt.split("TEXT TO TRANSLATE")[1];
+  expect(firstTranslationInput).toContain("Long cue 10.");
+  expect(firstTranslationInput).toContain("Long cue 11.");
+  expect(firstTranslationInput).toContain("Long cue 12.");
+  expect(firstTranslationInput).not.toContain("Long cue 13.");
+  expect(firstTranslationInput).not.toContain("Long cue 1.");
+
+  await videoPage.evaluate(() => window.setSubtitleTime(60));
+  await expect(videoPage.locator("#transly-caption-window")).toContainText("长视频第 2 句。");
+  await expect.poll(() => provider.translationRequests().length).toBe(4);
+  const seekTranslationInput = provider.translationRequests()[2].prompt.split("TEXT TO TRANSLATE")[1];
+  expect(seekTranslationInput).toContain("Long cue 1.");
+  expect(seekTranslationInput).toContain("Long cue 2.");
+  expect(seekTranslationInput).toContain("Long cue 3.");
+
+  const requestsBeforeCachedSeek = provider.translationRequests().length;
+  await videoPage.evaluate(() => window.setSubtitleTime(600));
+  await expect(videoPage.locator("#transly-caption-window")).toContainText("长视频第 11 句。", { timeout: 500 });
+  await videoPage.waitForTimeout(200);
+  expect(provider.translationRequests()).toHaveLength(requestsBeforeCachedSeek);
 });
 
 test("Transly loads a disabled native subtitle track and restores it when turned off", async ({
@@ -186,11 +419,11 @@ test("Transly loads a disabled native subtitle track and restores it when turned
   await expect.poll(() => videoPage.locator("video").evaluate((video) => video.textTracks[0]?.mode)).toBe("disabled");
   await videoPage.evaluate(() => window.setSubtitleTime(1));
 
-  await videoPage.locator("#transly-subtitle-controls .toggle").click();
+  await setPlayerSubtitles(videoPage, true);
   await expect(videoPage.locator("#transly-caption-window")).toContainText("视频中的第一句字幕。");
   await expect.poll(() => videoPage.locator("video").evaluate((video) => video.textTracks[0]?.mode)).toBe("hidden");
 
-  await videoPage.locator("#transly-subtitle-controls .toggle").click();
+  await setPlayerSubtitles(videoPage, false);
   await expect.poll(() => videoPage.locator("video").evaluate((video) => video.textTracks[0]?.mode)).toBe("disabled");
 });
 
@@ -235,6 +468,11 @@ test("a reader configures a provider, translates progressively, changes reading 
   await expect(article.locator(".transly-loading")).toHaveCount(0);
   await expect(article.locator(".transly-translation:not(.transly-loading)")).toHaveCount(5);
   await expect(article.locator(".transly-translation a[href='https://example.com/reference']")).toBeVisible();
+  await expect(article.locator(".transly-translation .edit-control a[href='https://auth.example.com/edit'] svg")).toBeVisible();
+  await expect(article.locator(".transly-translation a.reference-icon[href='https://example.com/reference-icon'] svg")).toBeVisible();
+  const translatedText = await article.locator(".transly-translation").allTextContents();
+  expect(translatedText.join(" ")).not.toContain("https://auth.example.com/edit");
+  expect(translatedText.join(" ")).not.toContain("https://example.com/reference-icon");
 
   const spacing = await article.locator("article > p").first().evaluate((source) => {
     const translation = source.nextElementSibling;
@@ -250,20 +488,25 @@ test("a reader configures a provider, translates progressively, changes reading 
   expect(spacing.translationMarginTop).toBeLessThan(spacing.translationMarginBottom);
 
   const modePopup = await openPopup(extension, tabId);
-  await expect(modePopup.locator("#translateArticle")).toHaveText("Restore original");
+  await expect(modePopup.locator("#translateArticle")).toHaveText("Restore");
+  await expect(modePopup.locator("#articleDisplayMode")).toContainText("Bilingual");
+  await expect(modePopup.locator("#articleDisplayMode .display-mode-glyph")).toHaveText("文A");
   await modePopup.locator("#articleDisplayMode").click();
+  await expect(modePopup.locator("#articleDisplayMode")).toContainText("Translation");
+  await expect(modePopup.locator("#articleDisplayMode .display-mode-glyph")).toHaveText("文");
   await expect(article.locator("html")).toHaveAttribute(
     "data-transly-article-display-mode",
     "translation-only"
   );
-  const firstSource = article.locator("[data-transly-article-id='article-1']");
-  await expect(firstSource).toBeHidden();
-  const firstTranslation = article.locator(".transly-translation[data-transly-for='article-1']");
-  await firstTranslation.click();
-  await expect(firstSource).toBeVisible();
+  const plainSource = article.locator("[data-transly-article-id='article-2']");
+  await expect(plainSource).toBeHidden();
+  const plainTranslation = article.locator(".transly-translation[data-transly-for='article-2']");
+  await plainTranslation.click();
+  await expect(plainSource).toBeVisible();
 
   const clearPopup = await openPopup(extension, tabId);
-  await expect(clearPopup.locator("#translateArticle")).toHaveText("Restore original");
+  await expect(clearPopup.locator("#translateArticle")).toHaveText("Restore");
+  await expect(clearPopup.locator("#articleDisplayMode")).toContainText("Translation");
   await clearPopup.locator("#translateArticle").click();
   await expect(article.locator(".transly-translation")).toHaveCount(0);
   await expect(article.locator("h1")).toBeVisible();
@@ -271,6 +514,8 @@ test("a reader configures a provider, translates progressively, changes reading 
 
   expect(provider.translationRequests()).toHaveLength(1);
   expect(provider.translationRequests()[0].authorization).toBe(`Bearer ${provider.apiKey}`);
+  expect(provider.translationRequests()[0].prompt).not.toContain("https://auth.example.com/edit");
+  expect(provider.translationRequests()[0].prompt).not.toContain("https://example.com/reference-icon");
 });
 
 test("a reader switches models in the popup and the choice survives a browser restart", async ({
@@ -299,6 +544,55 @@ test("a reader switches models in the popup and the choice survives a browser re
   expect(provider.translationRequests().at(-1)?.model).toBe("openai/gpt-e2e-fast");
 });
 
+test("the settings page automatically restores the provider model catalog", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  const requestsBeforeOpen = provider.state.requests.filter((request) => request.kind === "models").length;
+
+  const options = await extension.context.newPage();
+  await options.goto(`chrome-extension://${extension.extensionId}/options.html`);
+  await expect(options.locator("html")).toHaveAttribute("data-transly-options-ready", "true");
+  await expect(options.locator("#modelHint")).toHaveText(
+    `${provider.models.length} available models. Choose one from the list.`
+  );
+
+  await options.locator("#modelTrigger").click();
+  await expect(options.locator(".model-option")).toHaveCount(provider.models.length);
+  expect(provider.state.requests.filter((request) => request.kind === "models")).toHaveLength(requestsBeforeOpen + 1);
+});
+
+test("the model menu stays inside the browser-action popup and scrolls", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  const { tabId } = await openArticle(extension, provider);
+  const popup = await openPopup(extension, tabId);
+  await popup.setViewportSize({ width: 352, height: 400 });
+
+  await popup.locator("#popupModelTrigger").click();
+  const list = popup.locator("#popupModelList");
+  const menu = popup.locator(".model-popup");
+  await expect(list).toBeVisible();
+  const geometry = await menu.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      top: Math.round(rect.top),
+      bottom: Math.round(rect.bottom),
+      viewportHeight: innerHeight
+    };
+  });
+  expect(geometry.top).toBeGreaterThanOrEqual(8);
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight - 8);
+  await expect.poll(() => list.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+
+  const lastModel = popup.locator(".popup-model-option").last();
+  await lastModel.scrollIntoViewIfNeeded();
+  await expect(lastModel).toBeVisible();
+});
+
 test("a provider failure is visible and the reader can retry without reloading the extension", async ({
   extension,
   provider
@@ -313,7 +607,7 @@ test("a provider failure is visible and the reader can retry without reloading t
   await expect(article.locator(".transly-translation:not(.transly-loading)")).toHaveCount(0);
 
   const failedPopup = await openPopup(extension, tabId);
-  await expect(failedPopup.locator("#translateArticle")).toHaveText("Translate this article");
+  await expect(failedPopup.locator("#translateArticle")).toHaveText("Translate");
   await expect(failedPopup.locator("#status")).toContainText("Could not reach the translation service");
   await failedPopup.locator("#translateArticle").click();
   await expect(article.locator("html")).toHaveAttribute("data-transly-article-status", "translated");
@@ -342,7 +636,7 @@ test("an offline local provider leaves the page clean and explains how to recove
   await expect(article.locator("article")).toBeVisible();
 
   const failedPopup = await openPopup(extension, tabId);
-  await expect(failedPopup.locator("#translateArticle")).toHaveText("Translate this article");
+  await expect(failedPopup.locator("#translateArticle")).toHaveText("Translate");
   await expect(failedPopup.locator("#status")).toContainText("Local translation service is offline");
 
   provider.state.offline = false;

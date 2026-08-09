@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>Transly E2E Target-language TextTrack Video</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111318; }
+      video { width: 960px; height: 540px; max-width: 90vw; background: #222631; }
+    </style>
+  </head>
+  <body>
+    <video id="player" aria-label="Target-language TextTrack test video" src="/subtitle.mp4" muted autoplay loop>
+      <track kind="subtitles" srclang="und" label="Original" src="/captions-target.vtt" default>
+    </video>
+    <script>
+      window.setSubtitleTime = (time) => { document.querySelector("#player").currentTime = time; };
+      window.switchToSourceCaptions = () => {
+        const video = document.querySelector("#player");
+        video.textTracks[0].mode = "disabled";
+        const track = video.addTextTrack("subtitles", "English", "en");
+        track.addCue(new VTTCue(0, 2.5, "First caption from the video."));
+        track.addCue(new VTTCue(3, 5.5, "Second caption from the video."));
+        track.mode = "showing";
+      };
+    </script>
+  </body>
+</html>

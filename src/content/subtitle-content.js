@@ -5,6 +5,13 @@
   const SUBTITLE_MAX_CUES = 5000;
   const CAPTURE_DEBOUNCE_MS = 120;
   const NO_CAPTIONS_TIMEOUT_MS = 6000;
+  const SUBTITLE_PREFETCH_BEHIND_SECONDS = 60;
+  const SUBTITLE_PREFETCH_AHEAD_SECONDS = 180;
+  const SUBTITLE_PRIMARY_WINDOW_SECONDS = 60;
+  const SUBTITLE_PRIMARY_MAX_CHARS = 6000;
+  const SUBTITLE_PRIMARY_MAX_ITEMS = 40;
+  const SUBTITLE_NORMAL_MAX_IN_FLIGHT = 1;
+  const SUBTITLE_SEEK_MAX_IN_FLIGHT = 2;
   const DEFAULT_APPEARANCE = Object.freeze({
     subtitleDisplayMode: "bilingual",
     subtitleLanguageOrder: "source-first",
@@ -15,6 +22,7 @@
   });
   const trackedVideos = new Map();
   const sourceCueSets = new Map();
+  const targetLanguageSources = new Map();
   const translatedById = new Map();
   const pendingCueIds = new Set();
   const progressRequestRuns = new Map();
@@ -27,11 +35,20 @@
   let noCaptionsTimer = null;
   let renderFrame = 0;
   let controlsPositionFrame = 0;
-  let translationRunning = false;
+  let translationPlanning = false;
+  let translationInFlight = 0;
   let translationQueued = false;
+  let translationQueuedUrgent = false;
   let subtitleRunId = 0;
   let subtitleStatus = "off";
   let subtitleError = "";
+  let subtitleLastError = "";
+  let subtitleLastErrorAt = 0;
+  let subtitleSourceLanguage = "";
+  let subtitleSourceType = "";
+  let subtitleSkipReason = "";
+  let targetLanguageMediaKey = "";
+  let lastDiagnosticSignature = "";
   let videoSequence = 0;
   let observedUrl = location.href;
   let appearance = { ...DEFAULT_APPEARANCE };
@@ -99,6 +116,8 @@
     if (languageChanged) {
       translatedById.clear();
       pendingCueIds.clear();
+      targetLanguageSources.clear();
+      targetLanguageMediaKey = "";
       subtitleRunId++;
     }
     setSubtitleStatus(activeCues.length ? "translating" : "detecting");
@@ -116,6 +135,7 @@
     subtitleEnabled = false;
     subtitleRunId++;
     translationQueued = false;
+    translationQueuedUrgent = false;
     clearTimeout(translationTimer);
     clearTimeout(noCaptionsTimer);
     translationTimer = null;
@@ -130,16 +150,42 @@
 
   function handleCapture(capture) {
     if (!capture || typeof capture.body !== "string") return;
-    const language = core.subtitleLanguageFromUrl(capture.url);
-    if (core.sameLanguage(language, targetLanguage)) return;
     const cues = core.parseSubtitle(capture.body, capture.url).slice(0, SUBTITLE_MAX_CUES);
     if (!cues.length) return;
-    const key = `network:${capture.url}`;
+    const declaredLanguage = core.subtitleLanguageFromUrl(capture.url);
+    const inferredLanguage = core.inferSubtitleLanguage(cues);
+    const language = effectiveSubtitleLanguage(declaredLanguage, inferredLanguage);
+    const currentVideo = chooseVideo();
+    const capturedVideoId = youtubeVideoId(capture.url);
+    const mediaKey = capturedVideoId
+      ? `youtube:${capturedVideoId}`
+      : mediaIdentityForVideo(currentVideo);
+    const video = !mediaKey || mediaIdentityForVideo(currentVideo) === mediaKey
+      ? currentVideo
+      : null;
+    if (
+      core.sameLanguage(language, targetLanguage)
+    ) {
+      registerTargetLanguageSource({
+        key: `native:${mediaKey || capture.url}`,
+        type: "network",
+        language: language || targetLanguage,
+        video,
+        mediaKey,
+        updatedAt: Date.now()
+      });
+      return;
+    }
+    const key = mediaKey
+      ? `network:${mediaKey}:${language || "unknown"}`
+      : `network:${capture.url}`;
     sourceCueSets.set(key, {
       key,
       type: "network",
       cues,
       language,
+      video,
+      mediaKey,
       updatedAt: Date.now()
     });
     chooseBestSource(key);
@@ -148,7 +194,12 @@
   function observeVideos() {
     scanVideos();
     const observer = new MutationObserver(() => scanVideos());
-    observer.observe(document, { childList: true, subtree: true });
+    observer.observe(document, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["active", "playing"]
+    });
     global.addEventListener("resize", schedulePlayerControlsPosition, { passive: true });
     global.addEventListener("scroll", schedulePlayerControlsPosition, { passive: true, capture: true });
   }
@@ -162,19 +213,51 @@
 
   function trackVideo(video) {
     if (trackedVideos.has(video)) {
+      const record = trackedVideos.get(video);
+      record.mediaKey = mediaIdentityForVideo(video);
+      observePlayerState(video, record);
       scanTextTracks(video);
       return;
     }
     const record = {
       id: `video-${++videoSequence}`,
+      mediaKey: mediaIdentityForVideo(video),
       tracks: new Map(),
+      playerRoot: null,
+      playerStateObserver: null,
       remove: []
     };
     trackedVideos.set(video, record);
     const refresh = () => scanTextTracks(video);
+    const refreshPlayback = () => scheduleTranslation();
+    const refreshUrgently = () => scheduleTranslation({ urgent: true });
     video.textTracks?.addEventListener?.("addtrack", refresh);
+    video.addEventListener("timeupdate", refreshPlayback);
+    video.addEventListener("loadedmetadata", refreshPlayback);
+    video.addEventListener("seeking", refreshUrgently);
+    video.addEventListener("seeked", refreshUrgently);
     record.remove.push(() => video.textTracks?.removeEventListener?.("addtrack", refresh));
+    record.remove.push(() => video.removeEventListener("timeupdate", refreshPlayback));
+    record.remove.push(() => video.removeEventListener("loadedmetadata", refreshPlayback));
+    record.remove.push(() => video.removeEventListener("seeking", refreshUrgently));
+    record.remove.push(() => video.removeEventListener("seeked", refreshUrgently));
+    observePlayerState(video, record);
     scanTextTracks(video);
+  }
+
+  function observePlayerState(video, record) {
+    const playerRoot = video.closest("#movie_player.html5-video-player")
+      || youtubePreviewContainer(video);
+    if (record.playerRoot === playerRoot) return;
+    record.playerStateObserver?.disconnect();
+    record.playerRoot = playerRoot;
+    record.playerStateObserver = null;
+    if (!playerRoot) return;
+    record.playerStateObserver = new MutationObserver(() => schedulePlayerControlsPosition());
+    record.playerStateObserver.observe(playerRoot, {
+      attributes: true,
+      attributeFilter: ["class"]
+    });
   }
 
   function scanTextTracks(video) {
@@ -200,6 +283,7 @@
     for (const [video, record] of trackedVideos) {
       if (video.isConnected) continue;
       for (const remove of record.remove) remove();
+      record.playerStateObserver?.disconnect();
       for (const [track, trackRecord] of record.tracks) {
         track.removeEventListener?.("cuechange", trackRecord.listener);
         sourceCueSets.delete(trackRecord.key);
@@ -215,8 +299,11 @@
     translatedById.clear();
     pendingCueIds.clear();
     sourceCueSets.clear();
+    targetLanguageSources.clear();
     activeCues = [];
     activeSourceKey = "";
+    targetLanguageMediaKey = "";
+    clearSourceMetadata();
     restoreTextTracks();
     if (subtitleEnabled) {
       setSubtitleStatus("detecting");
@@ -231,7 +318,7 @@
 
   function ingestTextTrack(video, track) {
     const record = trackedVideos.get(video)?.tracks?.get(track);
-    if (!record || core.sameLanguage(track.language, targetLanguage)) return;
+    if (!record) return;
     const cueList = [...(track.cues || [])];
     if (!cueList.length) return;
     const incoming = cueList.map((cue) => ({
@@ -239,14 +326,31 @@
       end: cue.endTime,
       text: cue.text
     }));
+    const inferredLanguage = core.inferSubtitleLanguage(incoming);
+    const language = effectiveSubtitleLanguage(track.language, inferredLanguage);
+    if (
+      core.sameLanguage(language, targetLanguage)
+    ) {
+      registerTargetLanguageSource({
+        key: `native:${record.key}`,
+        type: "texttrack",
+        language: language || targetLanguage,
+        video,
+        mediaKey: trackedVideos.get(video)?.mediaKey || "",
+        track,
+        updatedAt: Date.now()
+      });
+      return;
+    }
     const previous = sourceCueSets.get(record.key)?.cues || [];
     const cues = core.mergeCues(previous, incoming, SUBTITLE_MAX_CUES);
     sourceCueSets.set(record.key, {
       key: record.key,
       type: "texttrack",
       cues,
-      language: track.language || "",
+      language,
       video,
+      mediaKey: trackedVideos.get(video)?.mediaKey || "",
       track,
       updatedAt: Date.now()
     });
@@ -254,15 +358,47 @@
   }
 
   function chooseBestSource(preferredKey = "") {
-    if (!sourceCueSets.size) return;
     const currentVideo = chooseVideo();
-    const candidates = [...sourceCueSets.values()].sort((left, right) => (
+    const currentMediaKey = mediaIdentityForVideo(currentVideo);
+    const allCandidates = [...sourceCueSets.values()];
+    const associatedCandidates = currentVideo
+      ? allCandidates.filter((source) => (
+        source.video === currentVideo
+        || Boolean(currentMediaKey && source.mediaKey === currentMediaKey)
+      ))
+      : allCandidates;
+    const candidates = (associatedCandidates.length
+      ? associatedCandidates
+      : allCandidates.filter((source) => !source.video)
+    ).sort((left, right) => (
       sourceScore(right, currentVideo, preferredKey) - sourceScore(left, currentVideo, preferredKey)
     ));
+    const newestSource = candidates
+      .slice()
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    const targetSource = [...targetLanguageSources.values()]
+      .filter((source) => (
+        source.video === currentVideo
+        || Boolean(currentMediaKey && source.mediaKey === currentMediaKey)
+      ))
+      .filter((source) => (
+        (source.type === "texttrack" && source.track?.mode === "showing")
+        || (source.type === "network" && source.updatedAt >= (newestSource?.updatedAt || 0))
+      ))
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    if (targetSource) {
+      activateTargetLanguageSource(targetSource);
+      return;
+    }
+    if (!sourceCueSets.size) return;
     const best = candidates[0];
     if (!best?.cues?.length) return;
     activeSourceKey = best.key;
     activeCues = best.cues;
+    targetLanguageMediaKey = "";
+    subtitleSourceLanguage = best.language || "unknown";
+    subtitleSourceType = best.type || "unknown";
+    subtitleSkipReason = "";
     clearTimeout(noCaptionsTimer);
     if (subtitleEnabled) {
       setSubtitleStatus(hasAnyTranslation() ? "ready" : "translating");
@@ -270,108 +406,221 @@
     }
   }
 
-  function sourceScore(source, currentVideo, preferredKey) {
-    const videoBonus = source.video && source.video === currentVideo ? 1_000_000 : 0;
-    const preferredBonus = source.key === preferredKey ? 100_000 : 0;
-    const textTrackBonus = source.type === "texttrack" ? 10_000 : 0;
-    return videoBonus + preferredBonus + textTrackBonus + Math.min(source.cues.length, 9000);
+  function registerTargetLanguageSource(source) {
+    if (!source?.mediaKey && !source?.video) return;
+    targetLanguageSources.set(source.key, source);
+    chooseBestSource(source.key);
   }
 
-  function scheduleTranslation() {
+  function activateTargetLanguageSource(source) {
+    const nextMediaKey = source.mediaKey || mediaIdentityForVideo(source.video);
+    const changed = targetLanguageMediaKey !== nextMediaKey || subtitleStatus !== "native";
+    targetLanguageMediaKey = nextMediaKey;
+    subtitleSourceLanguage = source.language || targetLanguage;
+    subtitleSourceType = source.type || "unknown";
+    subtitleSkipReason = "source-matches-target";
+    activeSourceKey = "";
+    activeCues = [];
+    clearTimeout(translationTimer);
+    clearTimeout(noCaptionsTimer);
+    translationTimer = null;
+    noCaptionsTimer = null;
+    translationQueued = false;
+    translationQueuedUrgent = false;
+    if (changed) {
+      subtitleRunId++;
+      pendingCueIds.clear();
+    }
+    restoreTextTracks();
+    if (source.type === "texttrack" && source.track) {
+      const record = trackedVideos.get(source.video)?.tracks?.get(source.track);
+      if (record && record.restoreMode === null) record.restoreMode = source.track.mode;
+      source.track.mode = "showing";
+    }
+    document.documentElement.dataset.translySubtitleCurrentCueState = "native";
+    hideCaption(document.querySelector("#transly-caption-window"));
+    if (subtitleEnabled) setSubtitleStatus("native");
+  }
+
+  function effectiveSubtitleLanguage(declaredLanguage, inferredLanguage) {
+    const declared = String(declaredLanguage || "").trim();
+    const normalized = declared.toLowerCase().replace(/_/g, "-").split("-")[0];
+    const declaredIsKnown = Boolean(
+      normalized && !["und", "unknown", "auto", "mul", "zxx"].includes(normalized)
+    );
+    return declaredIsKnown ? declared : inferredLanguage || "";
+  }
+
+  function clearSourceMetadata() {
+    subtitleSourceLanguage = "";
+    subtitleSourceType = "";
+    subtitleSkipReason = "";
+  }
+
+  function sourceScore(source, currentVideo, preferredKey) {
+    const currentMediaKey = mediaIdentityForVideo(currentVideo);
+    const videoBonus = source.video && source.video === currentVideo ? 1_000_000 : 0;
+    const mediaBonus = currentMediaKey && source.mediaKey === currentMediaKey ? 500_000 : 0;
+    const preferredBonus = source.key === preferredKey ? 100_000 : 0;
+    const textTrackBonus = source.type === "texttrack" ? 10_000 : 0;
+    return videoBonus + mediaBonus + preferredBonus + textTrackBonus + Math.min(source.cues.length, 9000);
+  }
+
+  function scheduleTranslation({ urgent = false } = {}) {
     if (!subtitleEnabled || !activeCues.length) return;
+    translationQueued = true;
+    translationQueuedUrgent = translationQueuedUrgent || urgent;
     clearTimeout(translationTimer);
     translationTimer = setTimeout(() => {
       translationTimer = null;
-      translateMissingCues().catch((error) => {
+      const queuedUrgent = translationQueuedUrgent;
+      translationQueued = false;
+      translationQueuedUrgent = false;
+      translateMissingCues({ urgent: queuedUrgent }).catch((error) => {
         setSubtitleStatus("error", error);
       });
-    }, CAPTURE_DEBOUNCE_MS);
+    }, translationQueuedUrgent ? 0 : CAPTURE_DEBOUNCE_MS);
   }
 
-  async function translateMissingCues() {
-    if (translationRunning) {
+  async function translateMissingCues({ urgent = false } = {}) {
+    if (translationPlanning) {
       translationQueued = true;
+      translationQueuedUrgent = translationQueuedUrgent || urgent;
       return;
     }
-    const groups = core.groupCuesByMeaning(activeCues);
-    const missingGroups = groups.filter((group) => (
-      group.cues.some((cue) => !translatedById.has(cue.id))
-      && group.cues.every((cue) => !pendingCueIds.has(cue.id))
-    ));
-    if (!missingGroups.length) {
-      if (hasAnyTranslation()) setSubtitleStatus("ready");
-      return;
-    }
-
-    translationRunning = true;
-    translationQueued = false;
-    const runId = subtitleRunId;
-    const sourceKey = activeSourceKey;
-    const requestedCues = missingGroups.flatMap((group) => group.cues);
-    for (const cue of requestedCues) pendingCueIds.add(cue.id);
+    translationPlanning = true;
+    let waitingForCapacity = false;
 
     try {
-      const settings = await getSettings();
+      const groups = core.groupCuesByMeaning(activeCues);
       const video = chooseVideo();
-      const prioritized = core.prioritizeCueGroups(missingGroups, video?.currentTime || 0);
-      const batches = core.chunkCueGroups(prioritized, {
-        maxChars: Number(settings.subtitleBatchChars || 1200),
-        maxItems: Number(settings.subtitleBatchMaxItems || 12)
+      const currentTime = video?.currentTime || 0;
+      const playbackGroups = core.selectCueGroupsForPlayback(groups, currentTime, {
+        behindSeconds: SUBTITLE_PREFETCH_BEHIND_SECONDS,
+        aheadSeconds: SUBTITLE_PREFETCH_AHEAD_SECONDS
       });
+      const missingGroups = playbackGroups.filter((group) => (
+        group.cues.some((cue) => !translatedById.has(cueStateKey(cue.id)))
+        && group.cues.every((cue) => !pendingCueIds.has(cueStateKey(cue.id)))
+      ));
+      if (!missingGroups.length) {
+        if (hasAnyTranslation()) setSubtitleStatus("ready");
+        return;
+      }
+
+      const settings = await getSettings();
+      const maxInFlight = urgent ? SUBTITLE_SEEK_MAX_IN_FLIGHT : SUBTITLE_NORMAL_MAX_IN_FLIGHT;
+      const availableSlots = Math.max(0, maxInFlight - translationInFlight);
+      if (!availableSlots) {
+        translationQueued = true;
+        translationQueuedUrgent = translationQueuedUrgent || urgent;
+        waitingForCapacity = true;
+        return;
+      }
+
+      const runId = subtitleRunId;
+      const sourceKey = activeSourceKey;
+      const mediaKey = activeMediaIdentity();
+      const cuesSnapshot = activeCues.slice();
+      const batches = core.chunkCueGroupsForPlayback(missingGroups, currentTime, {
+        maxChars: Number(settings.subtitleBatchChars || 1200),
+        maxItems: Number(settings.subtitleBatchMaxItems || 12),
+        primaryBehindSeconds: SUBTITLE_PRIMARY_WINDOW_SECONDS,
+        primaryAheadSeconds: SUBTITLE_PRIMARY_WINDOW_SECONDS,
+        primaryMaxChars: SUBTITLE_PRIMARY_MAX_CHARS,
+        primaryMaxItems: SUBTITLE_PRIMARY_MAX_ITEMS
+      });
+      const batchesToStart = batches.slice(0, availableSlots);
+      if (!batchesToStart.length) return;
       setSubtitleStatus("translating");
 
-      const results = await Promise.allSettled(batches.map(async (batch, index) => {
-        const clientRequestId = `subtitle-${crypto.randomUUID()}`;
-        progressRequestRuns.set(clientRequestId, runId);
-        try {
-          const cacheKey = await sha256(`${sourceKey}\n${targetLanguage}\n${batch.map((cue) => `${cue.subtitleGroup}:${cue.text}`).join("\n")}`);
-          const response = await requestTranslation({
-            mode: "subtitle",
-            phase: "translate",
-            clientRequestId,
-            batchIndex: index + 1,
-            batchCount: batches.length,
-            sourceBlockCount: activeCues.length,
-            targetLanguage,
-            url: location.href,
-            title: document.title,
-            context: buildSubtitleContext(activeCues, batch),
-            cacheKey,
-            items: batch.map(({ id, text, subtitleGroup }) => ({ id, text, subtitleGroup }))
-          });
-          if (runId !== subtitleRunId) return;
-          applyTranslations(response.items);
-        } finally {
-          progressRequestRuns.delete(clientRequestId);
-        }
-      }));
-
-      const failures = results.filter((result) => result.status === "rejected");
-      if (runId === subtitleRunId) {
-        if (hasAnyTranslation()) setSubtitleStatus("ready", failures[0]?.reason || "");
-        else if (failures.length) setSubtitleStatus("error", failures[0].reason);
+      for (const [index, batch] of batchesToStart.entries()) {
+        translateCueBatch({
+          batch,
+          batchIndex: index + 1,
+          batchCount: batches.length,
+          cuesSnapshot,
+          runId,
+          sourceKey,
+          mediaKey
+        });
       }
     } finally {
-      for (const cue of requestedCues) pendingCueIds.delete(cue.id);
-      translationRunning = false;
-      if (translationQueued && subtitleEnabled) scheduleTranslation();
+      translationPlanning = false;
+      if (translationQueued && !waitingForCapacity && subtitleEnabled) {
+        scheduleTranslation({ urgent: translationQueuedUrgent });
+      }
+    }
+  }
+
+  async function translateCueBatch({ batch, batchIndex, batchCount, cuesSnapshot, runId, sourceKey, mediaKey }) {
+    const requestedCues = batch.slice();
+    const clientRequestId = `subtitle-${crypto.randomUUID()}`;
+    let succeeded = false;
+    translationInFlight++;
+    for (const cue of requestedCues) pendingCueIds.add(cueStateKey(cue.id, mediaKey));
+    progressRequestRuns.set(clientRequestId, { runId, sourceKey, mediaKey });
+
+    try {
+      const source = sourceCueSets.get(sourceKey);
+      const videoMetadata = subtitleVideoMetadata(chooseVideo());
+      const cacheKey = await sha256([
+        "subtitle-v3",
+        targetLanguage,
+        source?.language || "unknown",
+        source?.mediaKey || videoMetadata.title || location.href,
+        batch.map((cue) => `${cue.subtitleGroup}:${cue.text}`).join("\n")
+      ].join("\n"));
+      const response = await requestTranslation({
+        mode: "subtitle",
+        phase: "translate",
+        clientRequestId,
+        batchIndex,
+        batchCount,
+        sourceBlockCount: cuesSnapshot.length,
+        targetLanguage,
+        url: location.href,
+        title: videoMetadata.title || document.title,
+        context: buildSubtitleContext(cuesSnapshot, batch, videoMetadata),
+        cacheKey,
+        items: batch.map(({ id, text, subtitleGroup }) => ({ id, text, subtitleGroup }))
+      });
+      if (runId !== subtitleRunId || sourceKey !== activeSourceKey) return;
+      applyTranslations(response.items, mediaKey);
+      succeeded = true;
+      setSubtitleStatus("ready");
+    } catch (error) {
+      if (runId === subtitleRunId && sourceKey === activeSourceKey) {
+        rememberSubtitleError(error);
+        if (hasAnyTranslation()) setSubtitleStatus("ready");
+        else setSubtitleStatus("error", error);
+      }
+    } finally {
+      progressRequestRuns.delete(clientRequestId);
+      for (const cue of requestedCues) pendingCueIds.delete(cueStateKey(cue.id, mediaKey));
+      translationInFlight = Math.max(0, translationInFlight - 1);
+      if (succeeded && runId === subtitleRunId && sourceKey === activeSourceKey && subtitleEnabled) {
+        scheduleTranslation({ urgent: translationQueuedUrgent });
+      }
     }
   }
 
   function renderSubtitleTranslationProgress(data) {
+    const requestRun = progressRequestRuns.get(data?.clientRequestId);
     if (
       !subtitleEnabled
       || !Array.isArray(data?.items)
-      || progressRequestRuns.get(data.clientRequestId) !== subtitleRunId
+      || requestRun?.runId !== subtitleRunId
+      || requestRun?.sourceKey !== activeSourceKey
     ) return;
-    applyTranslations(data.items);
+    applyTranslations(data.items, requestRun.mediaKey);
     if (hasAnyTranslation()) setSubtitleStatus("ready");
   }
 
-  function applyTranslations(items) {
+  function applyTranslations(items, mediaKey = activeMediaIdentity()) {
     for (const item of items || []) {
       const translation = core.compactText(item?.translation);
-      if (item?.id && translation) translatedById.set(item.id, translation);
+      if (item?.id && translation) translatedById.set(cueStateKey(item.id, mediaKey), translation);
     }
   }
 
@@ -404,11 +653,19 @@
       return;
     }
     const cue = core.activeCueAt(activeCues, video.currentTime || 0);
-    const translation = cue ? translatedById.get(cue.id) : "";
+    const translation = cue ? translatedById.get(cueStateKey(cue.id)) : "";
     if (!cue || !translation) {
+      const cueState = cue ? "pending" : "none";
+      if (document.documentElement.dataset.translySubtitleCurrentCueState !== cueState) {
+        document.documentElement.dataset.translySubtitleCurrentCueState = cueState;
+        if (cue) scheduleTranslation({ urgent: true });
+      }
+      if (cue && subtitleStatus === "ready") setSubtitleStatus("translating");
       hideCaption(windowEl);
       return;
     }
+
+    document.documentElement.dataset.translySubtitleCurrentCueState = "translated";
 
     const rect = video.getBoundingClientRect();
     if (rect.width < 120 || rect.height < 80 || rect.bottom <= 0 || rect.top >= innerHeight) {
@@ -416,6 +673,7 @@
       return;
     }
     const inset = subtitleBottomInset(video, rect);
+    applyCaptionContext(windowEl, video, rect);
     windowEl.style.display = "flex";
     windowEl.style.left = `${rect.left + rect.width / 2}px`;
     windowEl.style.bottom = `${Math.max(12, innerHeight - rect.bottom + inset)}px`;
@@ -428,16 +686,42 @@
 
   function ensurePlayerControls() {
     const video = chooseVideo();
-    if (!video) return;
-    playerControlsVideo = video;
+    if (!video) {
+      switchActiveVideo(null);
+      if (playerControlsHost) playerControlsHost.style.display = "none";
+      setPlayerPanelOpen(false);
+      return;
+    }
+    switchActiveVideo(video);
     if (!playerControlsHost) createPlayerControls();
 
     if (playerControlsHost.parentElement !== document.documentElement) {
       document.documentElement.appendChild(playerControlsHost);
     }
     playerControlsHost.dataset.placement = "floating";
+    playerControlsHost.dataset.context = youtubePreviewForVideo(video) ? "preview" : "playback";
     updatePlayerControls();
     schedulePlayerControlsPosition();
+  }
+
+  function switchActiveVideo(video) {
+    if (playerControlsVideo === video) return;
+    playerControlsVideo = video;
+    subtitleRunId++;
+    pendingCueIds.clear();
+    activeSourceKey = "";
+    activeCues = [];
+    targetLanguageMediaKey = "";
+    document.documentElement.dataset.translySubtitleCurrentCueState = "none";
+    clearSourceMetadata();
+    if (!subtitleEnabled || !video) return;
+    setSubtitleStatus("detecting");
+    chooseBestSource();
+    if (!activeCues.length) {
+      activateTextTrackCandidate();
+      triggerSiteCaptions();
+      armNoCaptionsTimeout();
+    }
   }
 
   function createPlayerControls() {
@@ -449,34 +733,41 @@
     playerControlsShadow.innerHTML = `
       <style>
         :host { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-        :host([data-placement="floating"]) { position: fixed; z-index: 2147483646; display: flex; }
+        :host([data-placement="floating"]) { position: fixed; z-index: 2147483647; display: flex; }
         .control {
-          position: relative; display: flex; align-items: center; height: 48px;
-          border-radius: 12px; background: rgba(18,18,20,.72);
-          box-shadow: 0 4px 16px rgba(0,0,0,.28);
-          -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); overflow: visible;
+          position: relative; display: flex; align-items: center; height: 36px;
+          border-radius: 18px; background: rgba(0,0,0,.5);
+          box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+          -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); overflow: visible;
         }
         button { box-sizing: border-box; border: 0; color: rgba(255,255,255,.88); background: transparent; font: inherit; cursor: pointer; }
         button:hover { background: rgba(255,255,255,.1); }
         button:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }
-        .toggle {
-          position: relative; display: grid; place-items: center;
-          width: 48px; height: 48px; padding: 0; border-radius: 12px 0 0 12px;
+        .menu-trigger {
+          position: relative; display: flex; align-items: center; justify-content: center; gap: 4px;
+          width: 52px; height: 36px; padding: 0 6px; border-radius: 18px;
         }
-        .brand-icon { display: block; width: 24px; height: 24px; opacity: .82; }
-        .status-dot { position: absolute; right: 7px; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: transparent; }
+        :host([data-context="preview"]) .control,
+        :host([data-context="preview"]) .menu-trigger { width: 36px; border-radius: 50%; }
+        :host([data-context="preview"]) .menu-trigger { padding: 0; }
+        :host([data-context="preview"]) .brand-icon { width: 20px; height: 20px; }
+        :host([data-context="preview"]) .caret,
+        :host([data-context="preview"]) .panel { display: none !important; }
+        :host([data-context="preview"]) .status-dot { left: 25px; top: 2px; }
+        .brand-icon { display: block; width: 22px; height: 22px; opacity: .82; }
+        .status-dot { position: absolute; left: 25px; top: 3px; width: 4px; height: 4px; border-radius: 50%; background: transparent; }
         :host([data-state="detecting"]) .status-dot,
         :host([data-state="translating"]) .status-dot { background: #f5b800; animation: pulse 1s ease-in-out infinite; }
-        :host([data-state="ready"]) .status-dot { background: #22c55e; }
-        :host([data-state="error"]) .status-dot,
-        :host([data-state="no-captions"]) .status-dot { background: #ef4444; }
-        :host([data-enabled="true"]) .brand-icon { opacity: 1; }
-        .appearance {
-          width: 32px; height: 32px; margin-right: 4px; padding: 0;
-          border-left: 1px solid rgba(255,255,255,.14); border-radius: 0 8px 8px 0; opacity: .72;
+        :host([data-state="ready"]) .status-dot,
+        :host([data-state="native"]) .status-dot {
+          left: 24px; top: 0; width: 7px; height: 4px; border-radius: 0;
+          border-right: 1.5px solid #22c55e; border-bottom: 1.5px solid #22c55e;
+          background: transparent; transform: rotate(45deg);
         }
-        .appearance:hover { color: #fff; }
-        .caret { display: inline-block; width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+        :host([data-state="error"]) .status-dot { background: #ef4444; }
+        :host([data-state="no-captions"]) .status-dot { background: rgba(255,255,255,.42); }
+        :host([data-enabled="true"]) .brand-icon { opacity: 1; }
+        .caret { display: inline-block; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; opacity: .68; transform: translateY(-1px) rotate(45deg); }
         .panel {
           position: absolute; right: 0; bottom: calc(100% + 8px); width: 320px; box-sizing: border-box;
           padding: 14px; border: 1px solid rgba(255,255,255,.14); border-radius: 10px;
@@ -485,6 +776,13 @@
           max-height: var(--transly-panel-max-height, 420px); overflow-y: auto;
         }
         .panel[hidden] { display: none; }
+        .enable-setting { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,.12); }
+        .enable-label { font-size: 13px; font-weight: 600; }
+        .subtitle-switch { position: relative; width: 36px; height: 22px; flex: 0 0 auto; padding: 0; border-radius: 11px; background: rgba(255,255,255,.2); }
+        .subtitle-switch:hover { background: rgba(255,255,255,.28); }
+        .subtitle-switch::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 140ms ease; }
+        .subtitle-switch[aria-checked="true"] { background: #fff; }
+        .subtitle-switch[aria-checked="true"]::after { background: #111; transform: translateX(14px); }
         .panel-title { margin: 0 0 12px; font-size: 13px; font-weight: 650; letter-spacing: 0; }
         .segment { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 2px; border-radius: 7px; background: rgba(255,255,255,.08); }
         .segment.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -502,14 +800,16 @@
         @keyframes pulse { 50% { opacity: .32; } }
       </style>
       <div class="control">
-        <button class="toggle" type="button" aria-label="Turn on translated subtitles" title="Turn on translated subtitles">
+        <button class="menu-trigger" type="button" aria-label="Transly subtitle settings" title="Transly subtitle settings" aria-expanded="false">
           <img class="brand-icon" src="${chrome.runtime.getURL("assets/icons/transly-player.svg")}" alt="" aria-hidden="true">
           <span class="status-dot" aria-hidden="true"></span>
-        </button>
-        <button class="appearance" type="button" aria-label="Subtitle appearance" title="Subtitle appearance" aria-expanded="false">
           <span class="caret" aria-hidden="true"></span>
         </button>
         <div class="panel" hidden>
+          <div class="enable-setting">
+            <span class="enable-label">Translated subtitles</span>
+            <button class="subtitle-switch" type="button" role="switch" aria-label="Turn on translated subtitles" aria-checked="false"></button>
+          </div>
           <p class="panel-title">Subtitle appearance</p>
           <div class="segment" aria-label="Subtitle display mode">
             <button type="button" data-mode="source-only" aria-pressed="false">Original</button>
@@ -548,16 +848,17 @@
       </div>
     `;
 
-    playerControlsShadow.querySelector(".toggle").addEventListener("click", () => {
-      setSubtitleEnabledFromPlayer(!subtitleEnabled).catch((error) => setSubtitleStatus("error", error));
-    });
-    const appearanceButton = playerControlsShadow.querySelector(".appearance");
-    appearanceButton.addEventListener("click", (event) => {
+    const menuTrigger = playerControlsShadow.querySelector(".menu-trigger");
+    menuTrigger.addEventListener("click", (event) => {
       event.stopPropagation();
-      playerPanelOpen = !playerPanelOpen;
-      schedulePlayerControlsPosition();
-      appearanceButton.setAttribute("aria-expanded", String(playerPanelOpen));
-      playerControlsShadow.querySelector(".panel").hidden = !playerPanelOpen;
+      if (playerControlsHost.dataset.context === "preview") {
+        setSubtitleEnabledFromPlayer(!subtitleEnabled).catch((error) => setSubtitleStatus("error", error));
+        return;
+      }
+      setPlayerPanelOpen(!playerPanelOpen);
+    });
+    playerControlsShadow.querySelector(".subtitle-switch").addEventListener("click", () => {
+      setSubtitleEnabledFromPlayer(!subtitleEnabled).catch((error) => setSubtitleStatus("error", error));
     });
     playerControlsShadow.querySelector(".panel").addEventListener("click", (event) => event.stopPropagation());
     for (const button of playerControlsShadow.querySelectorAll("[data-mode]")) {
@@ -575,9 +876,15 @@
 
   function closePlayerPanelOnOutsideClick(event) {
     if (!playerPanelOpen || event.composedPath().includes(playerControlsHost)) return;
-    playerPanelOpen = false;
-    playerControlsShadow.querySelector(".panel").hidden = true;
-    playerControlsShadow.querySelector(".appearance").setAttribute("aria-expanded", "false");
+    setPlayerPanelOpen(false);
+  }
+
+  function setPlayerPanelOpen(open) {
+    playerPanelOpen = open && playerControlsHost?.dataset.context !== "preview";
+    if (!playerControlsShadow) return;
+    playerControlsShadow.querySelector(".panel").hidden = !playerPanelOpen;
+    playerControlsShadow.querySelector(".menu-trigger").setAttribute("aria-expanded", String(playerPanelOpen));
+    schedulePlayerControlsPosition();
   }
 
   async function setSubtitleEnabledFromPlayer(enabled) {
@@ -603,21 +910,47 @@
       if (playerControlsHost.dataset.placement === "floating") playerControlsHost.style.display = "none";
       return;
     }
-    playerControlsVideo = video;
+    switchActiveVideo(video);
     const rect = video.getBoundingClientRect();
     if (playerControlsHost.dataset.placement !== "floating") return;
+    const preview = youtubePreviewForVideo(video);
+    if (preview) {
+      const ccControl = preview.querySelector(
+        "yt-inline-player-controls yt-closed-captions-toggle-button, yt-closed-captions-toggle-button"
+      );
+      const ccRect = ccControl?.getBoundingClientRect();
+      if (!ccRect || ccRect.width < 1 || ccRect.height < 1) {
+        playerControlsHost.style.display = "none";
+        return;
+      }
+      playerControlsHost.dataset.context = "preview";
+      playerControlsHost.style.display = "flex";
+      const controlRect = playerControlsHost.getBoundingClientRect();
+      const controlWidth = controlRect.width || 36;
+      const controlHeight = controlRect.height || 36;
+      playerControlsHost.style.left = `${ccRect.left + (ccRect.width - controlWidth) / 2}px`;
+      playerControlsHost.style.top = `${ccRect.bottom + 6}px`;
+      playerControlsHost.style.setProperty("--transly-panel-max-height", "0px");
+      return;
+    }
+    playerControlsHost.dataset.context = "playback";
+    const youtubePlayer = video.closest("#movie_player.html5-video-player");
+    if (youtubePlayer?.classList.contains("ytp-autohide") && !playerPanelOpen) {
+      playerControlsHost.style.display = "none";
+      return;
+    }
     if (rect.width < 180 || rect.height < 100 || rect.bottom <= 0 || rect.top >= innerHeight) {
       playerControlsHost.style.display = "none";
       return;
     }
     playerControlsHost.style.display = "flex";
-    const controlWidth = playerControlsHost.getBoundingClientRect().width || 176;
-    const youtubeControls = video.closest(".html5-video-player")?.querySelector(".ytp-right-controls");
+    const controlWidth = playerControlsHost.getBoundingClientRect().width || 52;
+    const youtubeControls = youtubePlayer?.querySelector(".ytp-right-controls");
     const youtubeControlsRect = youtubeControls?.getBoundingClientRect();
     const hasVisibleYoutubeControls = youtubeControlsRect
       && youtubeControlsRect.width > 0
       && youtubeControlsRect.height > 0;
-    const controlHeight = playerControlsHost.getBoundingClientRect().height || 48;
+    const controlHeight = playerControlsHost.getBoundingClientRect().height || 36;
     const controlTop = hasVisibleYoutubeControls
       ? youtubeControlsRect.top + (youtubeControlsRect.height - controlHeight) / 2
       : rect.bottom - controlHeight - 12;
@@ -678,15 +1011,41 @@
     node.style.setProperty("--transly-subtitle-background-opacity", String(appearance.subtitleBackgroundOpacity));
   }
 
+  function applyCaptionContext(node, video, rect) {
+    const preview = youtubePreviewForVideo(video);
+    node.dataset.context = preview ? "preview" : "playback";
+    if (!preview) {
+      node.style.removeProperty("--transly-rendered-source-font-size");
+      node.style.removeProperty("--transly-rendered-translation-font-size");
+      return;
+    }
+    node.style.setProperty(
+      "--transly-rendered-source-font-size",
+      `${Math.round(clampNumber(rect.width * 0.035, 13, 18, 15))}px`
+    );
+    node.style.setProperty(
+      "--transly-rendered-translation-font-size",
+      `${Math.round(clampNumber(rect.width * 0.042, 15, 21, 17))}px`
+    );
+  }
+
   function updatePlayerControls() {
     if (!playerControlsHost || !playerControlsShadow) return;
     playerControlsHost.dataset.enabled = String(subtitleEnabled);
     playerControlsHost.dataset.state = subtitleStatus;
-    const toggle = playerControlsShadow.querySelector(".toggle");
+    const toggle = playerControlsShadow.querySelector(".subtitle-switch");
     const action = subtitleEnabled ? "Turn off translated subtitles" : "Turn on translated subtitles";
+    const menuTrigger = playerControlsShadow.querySelector(".menu-trigger");
+    const stateLabel = subtitleStatusLabel();
+    menuTrigger.setAttribute(
+      "aria-label",
+      playerControlsHost.dataset.context === "preview" ? action : "Transly subtitle settings"
+    );
+    menuTrigger.title = stateLabel
+      ? `${stateLabel}. ${playerControlsHost.dataset.context === "preview" ? action : "Open subtitle settings"}`
+      : playerControlsHost.dataset.context === "preview" ? action : "Transly subtitle settings";
     toggle.setAttribute("aria-label", action);
-    toggle.title = action;
-    toggle.setAttribute("aria-pressed", String(subtitleEnabled));
+    toggle.setAttribute("aria-checked", String(subtitleEnabled));
     for (const button of playerControlsShadow.querySelectorAll("[data-mode]")) {
       button.setAttribute("aria-pressed", String(button.dataset.mode === appearance.subtitleDisplayMode));
     }
@@ -744,7 +1103,7 @@
 
   function chooseVideo() {
     return [...trackedVideos.keys()]
-      .filter((video) => video.isConnected)
+      .filter((video) => video.isConnected && isEligibleVideo(video))
       .map((video) => {
         const rect = video.getBoundingClientRect();
         const visibleWidth = Math.max(0, Math.min(innerWidth, rect.right) - Math.max(0, rect.left));
@@ -753,6 +1112,60 @@
         return { video, score: playingBonus + visibleWidth * visibleHeight };
       })
       .sort((left, right) => right.score - left.score)[0]?.video || null;
+  }
+
+  function isEligibleVideo(video) {
+    const preview = youtubePreviewContainer(video);
+    if (preview) return Boolean(youtubePreviewForVideo(video));
+    const hostname = location.hostname.toLowerCase();
+    const isYouTube = hostname === "youtube.com"
+      || hostname.endsWith(".youtube.com")
+      || hostname === "youtube-nocookie.com"
+      || hostname.endsWith(".youtube-nocookie.com");
+    if (isYouTube) {
+      const path = location.pathname;
+      const isPlaybackPage = path === "/watch"
+        || path.startsWith("/embed/")
+        || path.startsWith("/live/")
+        || path.startsWith("/shorts/")
+        || path.startsWith("/clip/");
+      if (!isPlaybackPage) return false;
+    }
+
+    const youtubePlayer = video.closest(".html5-video-player");
+    return !youtubePlayer || youtubePlayer.id === "movie_player";
+  }
+
+  function youtubePreviewContainer(video) {
+    return video?.closest?.("ytd-video-preview") || null;
+  }
+
+  function youtubePreviewForVideo(video) {
+    const preview = youtubePreviewContainer(video);
+    if (!preview?.hasAttribute("active") || !preview.hasAttribute("playing")) return null;
+    return video.closest("#inline-preview-player.html5-video-player") ? preview : null;
+  }
+
+  function mediaIdentityForVideo(video) {
+    if (!video) return "";
+    const preview = youtubePreviewContainer(video);
+    const previewHref = preview?.querySelector("#media-container-link[href], .ytp-title-link[href]")
+      ?.getAttribute("href");
+    const videoId = youtubeVideoId(previewHref || location.href);
+    if (videoId) return `youtube:${videoId}`;
+    const source = video.currentSrc || video.getAttribute("src") || "";
+    return source ? `media:${source}` : `page:${location.origin}${location.pathname}`;
+  }
+
+  function youtubeVideoId(value) {
+    try {
+      const url = new URL(value, location.href);
+      if (url.searchParams.get("v")) return url.searchParams.get("v");
+      const match = url.pathname.match(/^\/(?:embed|live|shorts|clip)\/([^/?#]+)/);
+      return match?.[1] || "";
+    } catch {
+      return "";
+    }
   }
 
   function hideSelectedTextTrack() {
@@ -771,14 +1184,13 @@
     if (!record) return;
     const candidates = [...record.tracks.keys()].filter((track) => (
       ["captions", "subtitles"].includes(track.kind)
-      && !core.sameLanguage(track.language, targetLanguage)
     ));
     const track = candidates.find((candidate) => candidate.mode !== "disabled") || candidates[0];
     const trackRecord = record.tracks.get(track);
     if (!track || !trackRecord) return;
     if (track.mode === "disabled") {
       trackRecord.restoreMode = track.mode;
-      track.mode = "hidden";
+      track.mode = core.sameLanguage(track.language, targetLanguage) ? "showing" : "hidden";
     }
     ingestTextTrack(video, track);
   }
@@ -795,7 +1207,11 @@
   function triggerSiteCaptions() {
     setTimeout(() => {
       if (!subtitleEnabled || activeCues.length) return;
-      const button = document.querySelector(".ytp-subtitles-button");
+      const video = chooseVideo();
+      const preview = youtubePreviewForVideo(video);
+      const button = preview
+        ? preview.querySelector("yt-closed-captions-toggle-button button, button.ytmClosedCaptioningButtonButton")
+        : video?.closest("#movie_player.html5-video-player")?.querySelector(".ytp-subtitles-button");
       if (!button) return;
       const enabled = button.getAttribute("aria-pressed") === "true";
       if (!enabled) button.click();
@@ -812,12 +1228,18 @@
   function setSubtitleStatus(status, error = "") {
     subtitleStatus = status;
     subtitleError = error ? String(error?.message || error) : "";
+    if (subtitleError) rememberSubtitleError(subtitleError);
     document.documentElement.dataset.translySubtitlesEnabled = String(subtitleEnabled);
     document.documentElement.dataset.translySubtitleStatus = status;
     document.documentElement.dataset.translySubtitleCueCount = String(activeCues.length);
+    document.documentElement.dataset.translySubtitleSourceLanguage = subtitleSourceLanguage;
+    document.documentElement.dataset.translySubtitleTargetLanguage = targetLanguage;
+    document.documentElement.dataset.translySubtitleSourceType = subtitleSourceType;
+    document.documentElement.dataset.translySubtitleSkipReason = subtitleSkipReason;
     if (subtitleError) document.documentElement.dataset.translySubtitleError = subtitleError;
     else delete document.documentElement.dataset.translySubtitleError;
     updatePlayerControls();
+    recordSubtitleDiagnostic();
   }
 
   function subtitleState() {
@@ -825,25 +1247,158 @@
       subtitleEnabled,
       subtitleStatus,
       subtitleError,
+      subtitleLastError,
+      subtitleLastErrorAt: subtitleLastErrorAt || null,
       subtitleCueCount: activeCues.length,
-      subtitleTranslatedCueCount: translatedById.size
+      subtitleTranslatedCueCount: activeCues.filter((cue) => (
+        translatedById.has(cueStateKey(cue.id))
+      )).length,
+      subtitleSourceLanguage,
+      subtitleTargetLanguage: targetLanguage,
+      subtitleSourceType,
+      subtitleSourceKey: activeSourceKey || targetLanguageMediaKey,
+      subtitleSkipReason,
+      subtitleCurrentCueState: document.documentElement.dataset.translySubtitleCurrentCueState || "none",
+      pageUrl: location.href,
+      pageTitle: document.title
     };
   }
 
-  function hasAnyTranslation() {
-    return activeCues.some((cue) => translatedById.has(cue.id));
+  function subtitleStatusLabel() {
+    if (subtitleStatus === "native") return "Captions already match the target language";
+    if (subtitleStatus === "error") return subtitleError || "Subtitle translation failed";
+    if (subtitleStatus === "no-captions") return "No captions were detected";
+    if (subtitleStatus === "detecting") return "Detecting captions";
+    if (subtitleStatus === "translating") return "Translating captions";
+    if (subtitleStatus === "ready") return "Translated captions ready";
+    return "";
   }
 
-  function buildSubtitleContext(cues, batch = []) {
+  function recordSubtitleDiagnostic() {
+    const state = subtitleState();
+    const signature = JSON.stringify({
+      status: state.subtitleStatus,
+      error: state.subtitleError,
+      lastError: state.subtitleLastError,
+      sourceLanguage: state.subtitleSourceLanguage,
+      targetLanguage: state.subtitleTargetLanguage,
+      sourceKey: state.subtitleSourceKey,
+      skipReason: state.subtitleSkipReason,
+      cueCount: state.subtitleCueCount,
+      translatedCueCount: state.subtitleTranslatedCueCount
+    });
+    if (signature === lastDiagnosticSignature) return;
+    lastDiagnosticSignature = signature;
+    chrome.runtime.sendMessage({
+      type: "TRANSLY_RECORD_DIAGNOSTIC",
+      payload: state
+    }, () => void chrome.runtime.lastError);
+  }
+
+  function hasAnyTranslation() {
+    return activeCues.some((cue) => translatedById.has(cueStateKey(cue.id)));
+  }
+
+  function activeMediaIdentity() {
+    return mediaIdentityForVideo(chooseVideo()) || activeSourceKey || "page";
+  }
+
+  function cueStateKey(cueId, mediaKey = activeMediaIdentity()) {
+    return `${mediaKey || "page"}::${cueId}`;
+  }
+
+  function rememberSubtitleError(error) {
+    const message = String(error?.message || error || "");
+    if (!message) return;
+    subtitleLastError = message;
+    subtitleLastErrorAt = Date.now();
+  }
+
+  function buildSubtitleContext(cues, batch = [], videoMetadata = {}) {
     const requestedIds = new Set(batch.map((cue) => cue.id));
     const requestedIndexes = cues
       .map((cue, index) => requestedIds.has(cue.id) ? index : -1)
       .filter((index) => index >= 0);
     const first = requestedIndexes.length ? Math.max(0, Math.min(...requestedIndexes) - 6) : 0;
     const last = requestedIndexes.length ? Math.min(cues.length, Math.max(...requestedIndexes) + 7) : cues.length;
-    return [document.title, cues.slice(first, last).map((cue) => cue.text).join("\n").slice(0, 12000)]
+    const metadata = [
+      videoMetadata.title ? `Title: ${videoMetadata.title}` : "",
+      videoMetadata.channel ? `Channel: ${videoMetadata.channel}` : "",
+      videoMetadata.description ? `Description: ${videoMetadata.description}` : ""
+    ].filter(Boolean).join("\n");
+    const transcript = cues.slice(first, last).map((cue) => cue.text).join("\n").slice(0, 12000);
+    return [
+      metadata ? `VIDEO CONTEXT (reference only)\n${metadata}` : "",
+      transcript ? `TRANSCRIPT CONTEXT (reference only)\n${transcript}` : ""
+    ]
       .filter(Boolean)
       .join("\n\n");
+  }
+
+  function subtitleVideoMetadata(video) {
+    const isYouTubeSurface = /(^|\.)youtube\.com$/i.test(location.hostname)
+      || Boolean(video?.closest?.("ytd-video-preview, #movie_player.html5-video-player"));
+    if (!video || !isYouTubeSurface) {
+      return { title: cleanYouTubeTitle(document.title), channel: "", description: "" };
+    }
+
+    const card = video.closest(
+      "ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer"
+    );
+    const preview = youtubePreviewContainer(video);
+    const localRoot = card || preview;
+    const title = firstContextText(localRoot, [
+      "#video-title",
+      "a#video-title",
+      "[data-title]"
+    ]) || firstContextText(document, [
+      "ytd-watch-metadata h1 yt-formatted-string",
+      "h1.ytd-watch-metadata",
+      "h1"
+    ]) || metaContext("meta[property='og:title'], meta[name='title']") || cleanYouTubeTitle(document.title);
+    const channel = firstContextText(localRoot, [
+      "ytd-channel-name a",
+      "#channel-name a",
+      "#channel-name"
+    ]) || firstContextText(document, [
+      "ytd-watch-metadata ytd-channel-name a",
+      "#owner #channel-name a"
+    ]) || metaContext("meta[itemprop='author']");
+    const description = firstContextText(document, [
+      "ytd-watch-metadata #description-inline-expander",
+      "ytd-watch-metadata #description",
+      "#description-inline-expander"
+    ]) || metaContext("meta[property='og:description'], meta[name='description']");
+
+    return {
+      title: compactContextText(title, 300),
+      channel: compactContextText(channel, 160),
+      description: compactContextText(description, 1600)
+    };
+  }
+
+  function firstContextText(root, selectors) {
+    if (!root?.querySelector) return "";
+    for (const selector of selectors) {
+      const element = root.querySelector(selector);
+      const value = element?.getAttribute?.("title")
+        || element?.getAttribute?.("data-title")
+        || element?.textContent;
+      if (String(value || "").trim()) return value;
+    }
+    return "";
+  }
+
+  function metaContext(selector) {
+    return document.querySelector(selector)?.getAttribute("content") || "";
+  }
+
+  function cleanYouTubeTitle(value) {
+    return String(value || "").replace(/\s+-\s+YouTube\s*$/i, "").trim();
+  }
+
+  function compactContextText(value, maxLength) {
+    return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
   }
 
   function requestTranslation(payload) {

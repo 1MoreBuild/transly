@@ -95,3 +95,79 @@ test("prioritizes whole semantic groups without changing cue order or splitting 
   assert.deepEqual(batches[0].map((cue) => cue.subtitleGroup), [1, 1]);
   assert.deepEqual(batches[1].map((cue) => cue.text), ["First clause,", "then its ending."]);
 });
+
+test("translates the current minute first and leaves distant cues for later batches", () => {
+  const cues = core.normalizeCues([
+    { start: 0, end: 2, text: "First sentence." },
+    { start: 20, end: 22, text: "Current sentence." },
+    { start: 30, end: 32, text: "Next sentence." },
+    { start: 40, end: 42, text: "Later sentence." },
+    { start: 100, end: 102, text: "Distant sentence." }
+  ]);
+  const groups = core.groupCuesByMeaning(cues);
+  const batches = core.chunkCueGroupsForPlayback(groups, 21, {
+    maxChars: 400,
+    maxItems: 2,
+    primaryBehindSeconds: 60,
+    primaryAheadSeconds: 60,
+    primaryMaxChars: 6000,
+    primaryMaxItems: 40
+  });
+
+  assert.deepEqual(batches[0].map((cue) => cue.text), [
+    "Current sentence.",
+    "Next sentence.",
+    "First sentence.",
+    "Later sentence."
+  ]);
+  assert.deepEqual(
+    batches.slice(1).flat().map((cue) => cue.text),
+    ["Distant sentence."]
+  );
+});
+
+test("keeps a short subtitle window in one request", () => {
+  const cues = core.normalizeCues([
+    { start: 0, end: 2, text: "First sentence." },
+    { start: 3, end: 5, text: "Second sentence." }
+  ]);
+  const groups = core.groupCuesByMeaning(cues);
+  const batches = core.chunkCueGroupsForPlayback(groups, 1, { maxChars: 1200, maxItems: 12 });
+
+  assert.equal(batches.length, 1);
+  assert.deepEqual(batches[0].map((cue) => cue.text), ["First sentence.", "Second sentence."]);
+});
+
+test("selects a bounded playhead window and falls back to the nearest group", () => {
+  const cues = core.normalizeCues([
+    { start: 0, end: 2, text: "Opening sentence." },
+    { start: 90, end: 92, text: "Previous sentence." },
+    { start: 120, end: 122, text: "Current sentence." },
+    { start: 210, end: 212, text: "Upcoming sentence." },
+    { start: 420, end: 422, text: "Distant sentence." }
+  ]);
+  const groups = core.groupCuesByMeaning(cues);
+
+  const nearby = core.selectCueGroupsForPlayback(groups, 120, {
+    behindSeconds: 30,
+    aheadSeconds: 120
+  });
+  assert.deepEqual(nearby.map((group) => group.cues[0].text), [
+    "Current sentence.",
+    "Previous sentence.",
+    "Upcoming sentence."
+  ]);
+
+  const nearest = core.selectCueGroupsForPlayback(groups, 700, {
+    behindSeconds: 10,
+    aheadSeconds: 10
+  });
+  assert.deepEqual(nearest.map((group) => group.cues[0].text), ["Distant sentence."]);
+});
+
+test("infers CJK subtitle scripts conservatively when language metadata is missing", () => {
+  assert.equal(core.inferSubtitleLanguage("这段视频已经有中文字幕，因此不需要再次翻译。"), "zh");
+  assert.equal(core.inferSubtitleLanguage("この動画には日本語の字幕があります。"), "ja");
+  assert.equal(core.inferSubtitleLanguage("이 동영상에는 한국어 자막이 있습니다."), "ko");
+  assert.equal(core.inferSubtitleLanguage("This video already has English captions."), "");
+});
