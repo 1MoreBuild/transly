@@ -72,6 +72,7 @@ const ARTICLE_PROTECTED_INLINE_SELECTOR = [
   "[data-transly-stay-original]",
   "[translate=no]", ".notranslate"
 ].join(",");
+const ARTICLE_VISUAL_INLINE_SELECTOR = "img,svg,picture,canvas,video";
 const ARTICLE_PLACEHOLDER_PREFIX = "[[TRANSLY_PH_";
 const ARTICLE_PLACEHOLDER_RE = /\[\[TRANSLY_PH_(\d+)]]/g;
 const ARTICLE_GENERIC_CONTAINER_SELECTORS = [
@@ -140,6 +141,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message?.type === "TRANSLY_TRANSLATE_ARTICLE") {
     const clientRequestId = crypto.randomUUID();
+    setArticleDisplayMode(message.articleDisplayMode);
     activeArticleClientRunId = clientRequestId;
     setArticleRuntimeState("running", { clientRequestId });
     sendResponse({ ok: true, data: { status: "started", clientRequestId } });
@@ -189,7 +191,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         subtitleEnabled: document.documentElement.dataset.translySubtitlesEnabled === "true",
         subtitleStatus: document.documentElement.dataset.translySubtitleStatus || "off",
         subtitleError: document.documentElement.dataset.translySubtitleError || "",
-        subtitleCueCount: Number(document.documentElement.dataset.translySubtitleCueCount || 0)
+        subtitleCueCount: Number(document.documentElement.dataset.translySubtitleCueCount || 0),
+        subtitleSourceLanguage: document.documentElement.dataset.translySubtitleSourceLanguage || "",
+        subtitleTargetLanguage: document.documentElement.dataset.translySubtitleTargetLanguage || "",
+        subtitleSkipReason: document.documentElement.dataset.translySubtitleSkipReason || ""
       }
     });
     return true;
@@ -1306,47 +1311,48 @@ function clearArticleTranslations(options = {}) {
 }
 
 function extractRichText(element) {
-  const protectedElements = [...element.querySelectorAll(ARTICLE_PROTECTED_INLINE_SELECTOR)]
-    .filter((node) => !safeClosest(node.parentElement, ARTICLE_PROTECTED_INLINE_SELECTOR));
-  if (!protectedElements.length) {
-    const text = compactText(element.innerText || element.textContent);
-    return { text, plainText: text, translatableText: text, placeholders: [] };
-  }
-
-  const clone = element.cloneNode(true);
-  const cloneProtected = [...clone.querySelectorAll(ARTICLE_PROTECTED_INLINE_SELECTOR)]
-    .filter((node) => !safeClosest(node.parentElement, ARTICLE_PROTECTED_INLINE_SELECTOR));
   const placeholders = [];
 
-  cloneProtected.forEach((node, index) => {
-    const original = protectedElements[index];
-    if (!original) return;
-    if (safeMatches(original, "br")) {
+  const addNodePlaceholder = (node) => {
+    const token = `${ARTICLE_PLACEHOLDER_PREFIX}${placeholders.length}]]`;
+    placeholders.push({ type: "node", node: node.cloneNode(true) });
+    return ` ${token} `;
+  };
+
+  const serializeNode = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+
+    if (isVisualOnlyInlineSubtree(node)) return addNodePlaceholder(node);
+
+    if (safeMatches(node, "br")) {
       const token = `${ARTICLE_PLACEHOLDER_PREFIX}${placeholders.length}]]`;
       placeholders.push({ type: "lineBreak", value: "\n" });
-      node.replaceWith(document.createTextNode(` ${token} `));
-      return;
+      return ` ${token} `;
     }
-    if (safeMatches(original, "a[href]")) {
+
+    if (safeMatches(node, "a[href]")) {
+      const linkText = compactText(node.innerText || node.textContent);
+      if (!linkText) return addNodePlaceholder(node);
+
       const startToken = `${ARTICLE_PLACEHOLDER_PREFIX}${placeholders.length}]]`;
       placeholders.push({
         type: "linkStart",
-        node: original.cloneNode(false),
-        style: captureLinkStyle(original)
+        node: node.cloneNode(false),
+        style: captureLinkStyle(node)
       });
+      const content = [...node.childNodes].map(serializeNode).join("");
       const endToken = `${ARTICLE_PLACEHOLDER_PREFIX}${placeholders.length}]]`;
       placeholders.push({ type: "linkEnd" });
-      const linkText = compactText(original.innerText || original.textContent || original.href);
-      node.replaceWith(document.createTextNode(` ${startToken} ${linkText} ${endToken} `));
-      return;
+      return ` ${startToken} ${content} ${endToken} `;
     }
 
-    const token = `${ARTICLE_PLACEHOLDER_PREFIX}${placeholders.length}]]`;
-    placeholders.push({ type: "node", node: original.cloneNode(true) });
-    node.replaceWith(document.createTextNode(` ${token} `));
-  });
+    if (safeMatches(node, ARTICLE_PROTECTED_INLINE_SELECTOR)) return addNodePlaceholder(node);
 
-  const text = compactText(clone.textContent);
+    return [...node.childNodes].map(serializeNode).join("");
+  };
+
+  const text = compactText([...element.childNodes].map(serializeNode).join(""));
   const plainText = compactText(element.innerText || element.textContent);
   const extractTranslatableText = globalThis.TranslyArticleText?.extractTranslatableText;
   if (typeof extractTranslatableText !== "function") {
@@ -1358,6 +1364,14 @@ function extractRichText(element) {
     translatableText: extractTranslatableText(text),
     placeholders
   };
+}
+
+function isVisualOnlyInlineSubtree(element) {
+  const hasVisual = safeMatches(element, ARTICLE_VISUAL_INLINE_SELECTOR)
+    || Boolean(element.querySelector(ARTICLE_VISUAL_INLINE_SELECTOR));
+  if (!hasVisual) return false;
+  const visibleText = compactText(element.innerText || element.textContent);
+  return !/[\p{L}\p{N}]/u.test(visibleText);
 }
 
 function captureLinkStyle(link) {

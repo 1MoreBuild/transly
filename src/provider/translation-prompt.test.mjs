@@ -70,7 +70,8 @@ test("subtitle prompt translates semantic groups and aligns them back to timed c
   });
 
   assert.match(request.instructions, /spoken Simplified Chinese/);
-  assert.match(request.instructions, /full transcript context only to understand meaning/);
+  assert.match(request.instructions, /video metadata and transcript context only to understand meaning/);
+  assert.match(request.instructions, /Never translate, copy, summarize, or otherwise include context/);
   assert.match(request.instructions, /understand each complete group as one utterance/);
   assert.match(request.instructions, /distribute its translation back across that group's timed cues/);
   assert.match(request.instructions, /never move meaning across groups/);

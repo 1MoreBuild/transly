@@ -153,6 +153,19 @@
     ));
   }
 
+  function selectCueGroupsForPlayback(groups, currentTime, options = {}) {
+    const now = Number(currentTime) || 0;
+    const behindSeconds = clampDecimal(options.behindSeconds, 0, 300, 30);
+    const aheadSeconds = clampDecimal(options.aheadSeconds, 10, 900, 120);
+    const windowStart = Math.max(0, now - behindSeconds);
+    const windowEnd = now + aheadSeconds;
+    const nearby = groups.filter((group) => (
+      group.end >= windowStart && group.start <= windowEnd
+    ));
+    return prioritizeCueGroups(nearby.length ? nearby : groups, now)
+      .slice(0, nearby.length || 1);
+  }
+
   function chunkCueGroups(groups, options = {}) {
     const maxChars = clamp(options.maxChars, 400, 12000, 1200);
     const maxItems = clamp(options.maxItems, 2, 40, 12);
@@ -172,6 +185,25 @@
     }
     if (current.length) chunks.push(flattenCueGroups(current));
     return chunks;
+  }
+
+  function chunkCueGroupsForPlayback(groups, currentTime, options = {}) {
+    const prioritized = prioritizeCueGroups(groups, currentTime);
+    if (!prioritized.length) return [];
+    const now = Number(currentTime) || 0;
+    const primaryStart = Math.max(0, now - clampDecimal(options.primaryBehindSeconds, 0, 300, 60));
+    const primaryEnd = now + clampDecimal(options.primaryAheadSeconds, 10, 300, 60);
+    const primary = prioritized.filter((group) => group.end >= primaryStart && group.start <= primaryEnd);
+    const primaryGroups = primary.length ? primary : prioritized.slice(0, 1);
+    const primaryIds = new Set(primaryGroups.map((group) => group.id));
+    const remaining = prioritized.filter((group) => !primaryIds.has(group.id));
+    return [
+      ...chunkCueGroups(primaryGroups, {
+        maxChars: options.primaryMaxChars ?? 6000,
+        maxItems: options.primaryMaxItems ?? 40
+      }),
+      ...chunkCueGroups(remaining, options)
+    ];
   }
 
   function prioritizeCues(cues, currentTime) {
@@ -208,6 +240,29 @@
     const b = normalize(right);
     if (!a || !b) return false;
     return a === b || a.split("-")[0] === b.split("-")[0];
+  }
+
+  function inferSubtitleLanguage(cuesOrText) {
+    const sample = (Array.isArray(cuesOrText)
+      ? cuesOrText.map((cue) => cue?.text || "").join("\n")
+      : String(cuesOrText || ""))
+      .slice(0, 6000);
+    if (!sample) return "";
+
+    const kanaCount = countMatches(sample, /[\u3040-\u30ff]/gu);
+    if (kanaCount >= 2) return "ja";
+
+    const hangulCount = countMatches(sample, /[\uac00-\ud7af]/gu);
+    if (hangulCount >= 2) return "ko";
+
+    const hanCount = countMatches(sample, /\p{Script=Han}/gu);
+    const letterCount = countMatches(sample, /\p{Letter}/gu);
+    if (hanCount >= 3 && hanCount / Math.max(1, letterCount) >= 0.2) return "zh";
+    return "";
+  }
+
+  function countMatches(text, pattern) {
+    return [...String(text || "").matchAll(pattern)].length;
   }
 
   function parseTime(value) {
@@ -302,15 +357,18 @@
   global.TranslySubtitleCore = Object.freeze({
     activeCueAt,
     chunkCueGroups,
+    chunkCueGroupsForPlayback,
     chunkCues,
     compactText,
     groupCuesByMeaning,
+    inferSubtitleLanguage,
     mergeCues,
     normalizeCues,
     parseSubtitle,
     parseTime,
     prioritizeCues,
     prioritizeCueGroups,
+    selectCueGroupsForPlayback,
     sameLanguage,
     subtitleLanguageFromUrl
   });

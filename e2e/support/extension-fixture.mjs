@@ -165,11 +165,35 @@ export async function openTextTrackPage(extension, provider) {
   return { page, tabId };
 }
 
+export async function openTargetSubtitlePage(extension, provider) {
+  const page = await extension.context.newPage();
+  await page.goto(provider.subtitleTargetUrl);
+  await expect(page.locator("video")).toBeVisible();
+  const tabId = await waitForArticleContentScript(extension, provider.subtitleTargetUrl);
+  return { page, tabId };
+}
+
 export async function openTriggeredSubtitlePage(extension, provider) {
   const page = await extension.context.newPage();
   await page.goto(provider.subtitleTriggerUrl);
   await expect(page.locator("video")).toBeVisible();
   const tabId = await waitForArticleContentScript(extension, provider.subtitleTriggerUrl);
+  return { page, tabId };
+}
+
+export async function openLongSubtitlePage(extension, provider) {
+  const page = await extension.context.newPage();
+  await page.goto(provider.subtitleLongUrl);
+  await expect(page.locator("video")).toBeVisible();
+  const tabId = await waitForArticleContentScript(extension, provider.subtitleLongUrl);
+  return { page, tabId };
+}
+
+export async function openSubtitlePreviewPage(extension, provider) {
+  const page = await extension.context.newPage();
+  await page.goto(provider.subtitlePreviewUrl);
+  await expect(page.locator("video")).toBeVisible();
+  const tabId = await waitForArticleContentScript(extension, provider.subtitlePreviewUrl);
   return { page, tabId };
 }
 

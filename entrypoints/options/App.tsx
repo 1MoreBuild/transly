@@ -14,6 +14,22 @@ type LocalProvider = {
   models?: string[];
 };
 type StatusTone = "neutral" | "success" | "error";
+type DiagnosticEvent = {
+  recordedAt: number;
+  pageUrl: string;
+  pageTitle: string;
+  subtitleStatus: string;
+  subtitleError: string;
+  subtitleLastError: string;
+  subtitleCueCount: number;
+  subtitleTranslatedCueCount: number;
+  subtitleSourceLanguage: string;
+  subtitleTargetLanguage: string;
+  subtitleSourceType: string;
+  subtitleSourceKey: string;
+  subtitleSkipReason: string;
+  subtitleCurrentCueState: string;
+};
 
 const PROTOCOLS = [
   { value: "auto", label: "Auto detect" },
@@ -22,11 +38,13 @@ const PROTOCOLS = [
 ] as const;
 
 export function App() {
+  const debugMode = new URLSearchParams(globalThis.location?.search || "").get("debug") === "1";
   const [apiUrl, setApiUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [protocol, setProtocol] = useState<Protocol>("auto");
   const [model, setModel] = useState("");
   const [models, setModels] = useState<string[]>([]);
+  const [modelCatalogLoaded, setModelCatalogLoaded] = useState(false);
   const [customModel, setCustomModel] = useState("");
   const [manualModel, setManualModel] = useState(false);
   const [savedConfiguration, setSavedConfiguration] = useState(false);
@@ -40,6 +58,9 @@ export function App() {
   const [discoveryBusy, setDiscoveryBusy] = useState(false);
   const [discoveryResults, setDiscoveryResults] = useState<LocalProvider[]>([]);
   const [discoveryLabel, setDiscoveryLabel] = useState("");
+  const [diagnostics, setDiagnostics] = useState<DiagnosticEvent[]>([]);
+  const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
+  const [diagnosticsStatus, setDiagnosticsStatus] = useState("");
 
   const selectedModel = manualModel ? customModel.trim() : model.trim();
   const connection = useMemo(() => ({ apiUrl, apiKey, protocol }), [apiKey, apiUrl, protocol]);
@@ -85,6 +106,7 @@ export function App() {
     setApiKey(config.apiKey);
     setProtocol(config.protocol || "auto");
     updateModelChoices(response.data.models || [], config.model);
+    setModelCatalogLoaded(true);
     setSavedConfiguration(true);
     showStatus(`Connected to Lane with ${config.model}.`, "success");
     return true;
@@ -105,7 +127,26 @@ export function App() {
         setProtocol(config.protocol || "auto");
         setSavedConfiguration(Boolean(config.apiUrl && config.model));
         if (config.model) updateModelChoices([config.model], config.model);
-        if (!config.apiUrl) await connectLaneProvider({ quiet: true });
+        if (!config.apiUrl) {
+          await connectLaneProvider({ quiet: true });
+          return;
+        }
+
+        setBusy("models");
+        const modelResponse = await sendRuntimeMessage<any>({
+          type: "TRANSLY_LIST_PROVIDER_MODELS",
+          payload: {
+            apiUrl: config.apiUrl,
+            apiKey: config.apiKey,
+            protocol: config.protocol || "auto"
+          }
+        });
+        if (!active) return;
+        setBusy("");
+        if (modelResponse.ok) {
+          updateModelChoices(modelResponse.data?.models || [], config.model);
+          setModelCatalogLoaded(true);
+        }
       })
       .finally(() => {
         document.documentElement.dataset.translyOptionsReady = "true";
@@ -113,11 +154,51 @@ export function App() {
     return () => { active = false; };
   }, [connectLaneProvider, showStatus, updateModelChoices]);
 
+  const refreshDiagnostics = useCallback(async () => {
+    setDiagnosticsBusy(true);
+    const response = await sendRuntimeMessage<{ events: DiagnosticEvent[] }>({
+      type: "TRANSLY_GET_DIAGNOSTICS"
+    });
+    setDiagnosticsBusy(false);
+    if (!response.ok) {
+      setDiagnosticsStatus(response.error || "Could not load diagnostics.");
+      return;
+    }
+    setDiagnostics((response.data?.events || []).slice().reverse());
+    setDiagnosticsStatus("");
+  }, []);
+
+  useEffect(() => {
+    if (debugMode) refreshDiagnostics();
+  }, [debugMode, refreshDiagnostics]);
+
+  async function clearDiagnostics() {
+    setDiagnosticsBusy(true);
+    const response = await sendRuntimeMessage({ type: "TRANSLY_CLEAR_DIAGNOSTICS" });
+    setDiagnosticsBusy(false);
+    if (!response.ok) {
+      setDiagnosticsStatus(response.error || "Could not clear diagnostics.");
+      return;
+    }
+    setDiagnostics([]);
+    setDiagnosticsStatus("");
+  }
+
+  async function copyDiagnostics() {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(diagnostics.slice().reverse(), null, 2));
+      setDiagnosticsStatus("Copied diagnostic report.");
+    } catch {
+      setDiagnosticsStatus("Could not copy diagnostics.");
+    }
+  }
+
   function resetModelChoices() {
     setModels([]);
     setModel("");
     setCustomModel("");
     setManualModel(false);
+    setModelCatalogLoaded(false);
     setShowSaveWithoutTest(false);
   }
 
@@ -146,6 +227,7 @@ export function App() {
       return;
     }
     updateModelChoices(result.models, selectedModel);
+    setModelCatalogLoaded(true);
     if (!quiet) {
       showStatus(result.models.length
         ? `Loaded ${result.models.length} available model${result.models.length === 1 ? "" : "s"}.`
@@ -186,6 +268,7 @@ export function App() {
     const nextModels = normalizeModels(result.models);
     const nextModel = selectedModel || chooseDefaultModel(nextModels);
     updateModelChoices(nextModels, nextModel);
+    setModelCatalogLoaded(true);
     if (!nextModel) {
       setBusy("");
       setManualModel(true);
@@ -243,6 +326,7 @@ export function App() {
     setApiKey("");
     setProtocol("auto");
     updateModelChoices(result.models || []);
+    setModelCatalogLoaded(true);
     showStatus(result.authRequired
       ? "Local service selected. Enter its API key, then connect."
       : "Local service selected. Confirm the model, then connect.", result.authRequired ? "neutral" : "success");
@@ -256,8 +340,12 @@ export function App() {
     showStatus("OpenAI API selected. Add your API key, then connect.");
   }
 
-  const modelHint = models.length
+  const modelHint = busy === "models" && !modelCatalogLoaded
+    ? "Loading available models…"
+    : modelCatalogLoaded && models.length
     ? `${models.length} available model${models.length === 1 ? "" : "s"}. Choose one from the list.`
+    : models.length
+      ? "Current model selected. Reload the available model list."
     : manualModel
       ? "Enter the provider model name exactly as the service exposes it."
       : "Load models to choose from those available to this service.";
@@ -409,6 +497,49 @@ export function App() {
           </div>
         </div>
       </form>
+
+      {debugMode && (
+        <section className="debug-panel" aria-labelledby="debugHeading">
+          <div className="debug-heading">
+            <div>
+              <p className="debug-eyebrow">Developer mode</p>
+              <h2 id="debugHeading">Subtitle diagnostics</h2>
+              <p>Recent state changes from this browser session. Provider keys and caption text are excluded.</p>
+            </div>
+            <div className="debug-actions">
+              <button type="button" disabled={diagnosticsBusy} onClick={refreshDiagnostics}>Refresh</button>
+              <button type="button" disabled={!diagnostics.length} onClick={copyDiagnostics}>Copy</button>
+              <button type="button" disabled={diagnosticsBusy || !diagnostics.length} onClick={clearDiagnostics}>Clear</button>
+            </div>
+          </div>
+          {diagnosticsStatus && <p className="debug-status" role="status">{diagnosticsStatus}</p>}
+          {!diagnostics.length && !diagnosticsBusy && <p className="debug-empty">No subtitle events recorded in this browser session.</p>}
+          <div className="debug-events">
+            {diagnostics.map((event, index) => (
+              <details className="debug-event" open={index === 0} key={`${event.recordedAt}-${index}`}>
+                <summary>
+                  <span className="debug-event-status" data-status={event.subtitleStatus}>{event.subtitleStatus}</span>
+                  <span>{new Date(event.recordedAt).toLocaleTimeString()}</span>
+                  <span className="debug-event-title">{event.pageTitle || event.pageUrl || "Untitled page"}</span>
+                </summary>
+                <dl>
+                  <dt>Language</dt><dd>{event.subtitleSourceLanguage || "unknown"} → {event.subtitleTargetLanguage || "unknown"}</dd>
+                  <dt>Source</dt><dd>{event.subtitleSourceType || "unknown"}</dd>
+                  <dt>Cues</dt><dd>{event.subtitleTranslatedCueCount || 0} / {event.subtitleCueCount || 0} translated</dd>
+                  <dt>Current cue</dt><dd>{event.subtitleCurrentCueState || "none"}</dd>
+                  {event.subtitleSkipReason && <><dt>Skipped</dt><dd>{event.subtitleSkipReason}</dd></>}
+                  {(event.subtitleError || event.subtitleLastError) && <>
+                    <dt>{event.subtitleError ? "Error" : "Last error"}</dt>
+                    <dd className="debug-error">{event.subtitleError || event.subtitleLastError}</dd>
+                  </>}
+                  <dt>Page</dt><dd className="debug-url">{event.pageUrl || "unknown"}</dd>
+                  <dt>Source key</dt><dd className="debug-url">{event.subtitleSourceKey || "none"}</dd>
+                </dl>
+              </details>
+            ))}
+          </div>
+        </section>
+      )}
     </main>
   );
 }

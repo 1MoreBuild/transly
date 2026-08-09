@@ -85,8 +85,11 @@ button { -webkit-tap-highlight-color: transparent; }
 .select-positioner {
   z-index: 1000;
   max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
 }
 .select-popup {
+  max-width: calc(100vw - 16px);
+  max-height: var(--available-height, calc(100vh - 16px));
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -97,9 +100,9 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 .select-popup[data-starting-style], .select-popup[data-ending-style] { opacity: 0; transform: scale(.98); }
 .language-popup { width: 208px; max-width: calc(100vw - 16px); }
-.model-popup { width: 286px; }
+.model-popup { width: 286px; max-width: calc(100vw - 16px); }
 .select-list {
-  max-height: min(286px, var(--available-height, 286px));
+  max-height: min(286px, calc(var(--available-height, 288px) - 2px));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 5px;
@@ -200,21 +203,36 @@ button { -webkit-tap-highlight-color: transparent; }
 .icon-button:hover { background: var(--surface-raised); color: var(--ink); }
 
 .primary-action-section { padding-top: 14px; }
-.primary-action-row { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; }
+.primary-action-row { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px; }
 .primary-action-row[data-has-translation="false"] { grid-template-columns: 1fr; }
 .display-mode-action {
-  display: grid;
-  width: 44px;
+  display: flex;
   height: 44px;
-  place-items: center;
-  padding: 0;
-  border: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-raised);
   color: var(--ink);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
   cursor: pointer;
 }
 .display-mode-action:hover { background: var(--line); }
+.display-mode-glyph {
+  display: inline-flex;
+  width: 22px;
+  height: 20px;
+  flex: 0 0 22px;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1;
+}
+.display-mode-swap { flex: 0 0 auto; color: var(--muted); }
 .primary-action {
   display: flex;
   width: 100%;

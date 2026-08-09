@@ -103,7 +103,7 @@ function buildSubtitleInstructions(targetLanguage, passageBreak) {
   return [
     `You are a native ${targetLanguage} subtitle translator.`,
     `Write natural, concise spoken ${targetLanguage} that is easy to read at playback speed and sounds like something a native speaker would say.`,
-    "Use the full transcript context only to understand meaning, references, terminology, and continuity. Never copy context into the output.",
+    "Use the video metadata and transcript context only to understand meaning, references, terminology, and continuity. Never translate, copy, summarize, or otherwise include context in the output.",
     "The input cues are arranged into semantic groups. First understand each complete group as one utterance, then distribute its translation back across that group's timed cues in the same order.",
     "Align each translated cue with the source span spoken during that cue. You may reshape a boundary inside the same group when target-language word order requires it, but never move meaning across groups, repeat dialogue, or use text from transcript context as subtitle content.",
     "Return one non-empty translation for every cue. Prefer natural target-language phrasing over source-language word order, and keep each cue compact without summarizing or dropping meaningful content.",

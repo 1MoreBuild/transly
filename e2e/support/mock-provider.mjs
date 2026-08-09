@@ -17,8 +17,20 @@ const SUBTITLE_TRACK_HTML = await readFile(
   new URL("../fixtures/subtitle-track.html", import.meta.url),
   "utf8"
 );
+const SUBTITLE_TARGET_HTML = await readFile(
+  new URL("../fixtures/subtitle-target.html", import.meta.url),
+  "utf8"
+);
 const SUBTITLE_TRIGGER_HTML = await readFile(
   new URL("../fixtures/subtitle-trigger.html", import.meta.url),
+  "utf8"
+);
+const SUBTITLE_LONG_HTML = await readFile(
+  new URL("../fixtures/subtitle-long.html", import.meta.url),
+  "utf8"
+);
+const SUBTITLE_PREVIEW_HTML = await readFile(
+  new URL("../fixtures/subtitle-preview.html", import.meta.url),
   "utf8"
 );
 const SUBTITLE_DISABLED_TRACK_HTML = await readFile(
@@ -40,16 +52,35 @@ Welcome to the second annual Code with Claude conference,
 
 00:00:02.550 --> 00:00:05.500
 where builders share what they learned.`;
+const SUBTITLE_TARGET_VTT = `WEBVTT
+
+00:00:00.000 --> 00:00:02.500
+这段视频已经有中文字幕。
+
+00:00:03.000 --> 00:00:05.500
+因此不需要再次翻译。`;
 const SUBTITLE_JSON3 = JSON.stringify({
   events: [
     { tStartMs: 0, dDurationMs: 2500, segs: [{ utf8: "First caption from the video." }] },
     { tStartMs: 3000, dDurationMs: 2500, segs: [{ utf8: "Second caption from the video." }] }
   ]
 });
+const SUBTITLE_LONG_JSON3 = JSON.stringify({
+  events: Array.from({ length: 15 }, (_, index) => ({
+    tStartMs: index * 60_000,
+    dDurationMs: 10_000,
+    segs: [{ utf8: `Long cue ${index + 1}.` }]
+  }))
+});
 const API_KEY = "transly-e2e-key";
 const MODELS = [
   "openai/gpt-e2e-primary",
   "openai/gpt-e2e-fast",
+  "openai/gpt-e2e-balanced",
+  "openai/gpt-e2e-precise",
+  "openai/gpt-e2e-long-context",
+  "openai/gpt-e2e-mini",
+  "openai/gpt-e2e-legacy",
   "openai/gpt-image-e2e"
 ];
 
@@ -57,6 +88,7 @@ export async function startMockProvider() {
   const state = {
     offline: false,
     failNextTranslation: false,
+    failTranslationNumber: 0,
     streamDelayMs: 260,
     requests: []
   };
@@ -89,9 +121,24 @@ export async function startMockProvider() {
       response.end(SUBTITLE_TRACK_HTML);
       return;
     }
+    if (request.method === "GET" && url.pathname === "/subtitle-target.html") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(SUBTITLE_TARGET_HTML);
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/subtitle-trigger.html") {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end(SUBTITLE_TRIGGER_HTML);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/subtitle-long.html") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(SUBTITLE_LONG_HTML);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/subtitle-preview.html") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(SUBTITLE_PREVIEW_HTML);
       return;
     }
     if (request.method === "GET" && url.pathname === "/subtitle-track-disabled.html") {
@@ -101,7 +148,7 @@ export async function startMockProvider() {
     }
     if (request.method === "GET" && url.pathname === "/api/timedtext") {
       response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      response.end(SUBTITLE_JSON3);
+      response.end(url.searchParams.get("variant") === "long" ? SUBTITLE_LONG_JSON3 : SUBTITLE_JSON3);
       return;
     }
     if (request.method === "GET" && url.pathname === "/captions.vtt") {
@@ -112,6 +159,11 @@ export async function startMockProvider() {
     if (request.method === "GET" && url.pathname === "/captions-semantic.vtt") {
       response.writeHead(200, { "content-type": "text/vtt; charset=utf-8" });
       response.end(SUBTITLE_SEMANTIC_VTT);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/captions-target.vtt") {
+      response.writeHead(200, { "content-type": "text/vtt; charset=utf-8" });
+      response.end(SUBTITLE_TARGET_VTT);
       return;
     }
     if (request.method === "GET" && url.pathname === "/subtitle.mp4") {
@@ -153,7 +205,11 @@ export async function startMockProvider() {
         prompt
       });
 
-      if (kind === "translation" && state.failNextTranslation) {
+      const translationNumber = state.requests.filter((entry) => entry.kind === "translation").length;
+      if (
+        kind === "translation"
+        && (state.failNextTranslation || state.failTranslationNumber === translationNumber)
+      ) {
         state.failNextTranslation = false;
         respondJson(response, 503, { error: { message: "Planned provider outage" } });
         return;
@@ -183,7 +239,10 @@ export async function startMockProvider() {
     subtitleUrl: `${origin}/subtitle.html`,
     subtitleSemanticUrl: `${origin}/subtitle-semantic.html`,
     subtitleTrackUrl: `${origin}/subtitle-track.html`,
+    subtitleTargetUrl: `${origin}/subtitle-target.html`,
     subtitleTriggerUrl: `${origin}/subtitle-trigger.html`,
+    subtitleLongUrl: `${origin}/subtitle-long.html`,
+    subtitlePreviewUrl: `${origin}/subtitle-preview.html`,
     subtitleDisabledTrackUrl: `${origin}/subtitle-track-disabled.html`,
     models: MODELS.slice(),
     state,
@@ -250,6 +309,8 @@ function translatePassage(source, index) {
   const placeholders = source.match(/\[\[TRANSLY_PH_\d+]]/g) || [];
   if (source.includes("First caption from the video")) return "视频中的第一句字幕。";
   if (source.includes("Second caption from the video")) return "视频中的第二句字幕。";
+  const longCue = source.match(/Long cue (\d+)\./);
+  if (longCue) return `长视频第 ${longCue[1]} 句。`;
   const translations = [
     "上下文让翻译更准确",
     "孤立来看，产品名称可能只有一种含义；放进完整文章后，它往往会变得更精确。",

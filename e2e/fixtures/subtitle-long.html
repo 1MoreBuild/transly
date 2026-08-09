@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Transly E2E Triggered Captions</title>
+    <title>Transly E2E Long Captions</title>
     <style>
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111318; }
       .html5-video-player { position: relative; width: min(960px, 90vw); }
@@ -13,22 +13,34 @@
   </head>
   <body>
     <div id="movie_player" class="html5-video-player ytp-autohide">
-      <video id="player" aria-label="Triggered caption test video" src="/subtitle.mp4" muted autoplay loop></video>
+      <video id="player" aria-label="Long caption test video"></video>
       <div class="ytp-right-controls">
-        <span class="caption-control-wrapper">
-          <button class="ytp-subtitles-button" type="button" aria-pressed="false">CC</button>
-        </span>
+        <button class="ytp-subtitles-button" type="button" aria-pressed="false">CC</button>
       </div>
     </div>
     <script>
       const player = document.querySelector("#player");
       const button = document.querySelector(".ytp-subtitles-button");
+      const mediaSource = new MediaSource();
+      const mediaReady = new Promise((resolve) => {
+        mediaSource.addEventListener("sourceopen", () => {
+          mediaSource.duration = 900;
+          resolve();
+        }, { once: true });
+      });
+      player.src = URL.createObjectURL(mediaSource);
       button.addEventListener("click", () => {
         const enabled = button.getAttribute("aria-pressed") !== "true";
         button.setAttribute("aria-pressed", String(enabled));
-        if (enabled) fetch("/api/timedtext?lang=en&fmt=json3").then((response) => response.text());
+        if (enabled) fetch("/api/timedtext?lang=en&fmt=json3&variant=long").then((response) => response.text());
       });
-      window.setSubtitleTime = (time) => { player.currentTime = time; };
+      window.setSubtitleTime = async (time) => {
+        await mediaReady;
+        player.dispatchEvent(new Event("seeking"));
+        player.currentTime = time;
+        player.dispatchEvent(new Event("seeked"));
+        player.dispatchEvent(new Event("timeupdate"));
+      };
     </script>
   </body>
 </html>
