@@ -193,9 +193,12 @@ First-item bootstrap:
 
 Release flow:
 
-1. Bump `package.json`; WXT writes that version into the generated manifest.
-2. Push a matching tag such as `v0.1.0`.
-3. The workflow installs Chromium, runs unit tests and real-extension E2E
+1. Confirm that every user-visible change has an appropriate `.changes`
+   fragment. Move those entries into `CHANGELOG.md`, bump `package.json`, update
+   the lockfile, and remove the consumed fragments. Review the complete release
+   diff. WXT writes the package version into the generated manifest.
+2. Push a matching tag such as `v0.3.0`.
+3. The workflow installs Chromium, runs contract tests and real-extension E2E
    journeys against a deterministic local provider, packages the extension,
    retains the ZIP as a workflow artifact, uploads it, and waits for asynchronous
    Store processing to finish.

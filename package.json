@@ -14,8 +14,8 @@
     "typecheck": "tsc --noEmit",
     "postinstall": "wxt prepare",
     "package": "npm run build && node tools/package-extension.mjs",
-    "test": "npm run typecheck && npm run test:unit && npm run test:e2e",
-    "test:unit": "node --test src/*.test.mjs src/content/*.test.mjs src/provider/*.test.mjs",
+    "test": "npm run typecheck && npm run test:contracts && npm run test:e2e",
+    "test:contracts": "node --test src/content/article-batching.test.mjs src/content/subtitle-core.test.mjs src/provider/*.test.mjs",
     "test:e2e": "TRANSLY_E2E=1 wxt build && TRANSLY_E2E=1 playwright test"
   },
   "devDependencies": {

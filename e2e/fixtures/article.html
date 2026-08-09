@@ -37,6 +37,26 @@
       a {
         color: #145ac7;
       }
+
+      table {
+        width: 100%;
+        margin: 0 0 24px;
+        border-collapse: collapse;
+      }
+
+      td {
+        width: 50%;
+        padding: 12px;
+        border: 1px solid #c9c9c5;
+        font-size: 18px;
+        vertical-align: top;
+      }
+
+      .comparison-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
     </style>
   </head>
   <body>
@@ -59,6 +79,20 @@
         <li>Complete passages should appear as the model finishes them.</li>
         <li>A failed request should be recoverable without reloading the extension.</li>
       </ul>
+      <table>
+        <tbody>
+          <tr>
+            <td id="direct-table-cell">Table translations stay inside their original cell.</td>
+            <td>Adjacent table content remains aligned.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="comparison-grid">
+        <p id="grid-source">Grid translations stay in their original column.</p>
+        <p>Adjacent grid content remains aligned.</p>
+      </div>
+      <pre><code id="protected-code">const language = "source";</code></pre>
+      <math id="protected-formula"><mi>x</mi><mo>=</mo><mn>1</mn></math>
     </article>
   </body>
 </html>

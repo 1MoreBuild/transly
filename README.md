@@ -114,7 +114,7 @@ Transly uses [WXT](https://wxt.dev/) with React for the popup and settings UI.
 `npm run dev` starts a development build, while `npm run build` writes the
 unpacked extension to `dist/extension`.
 
-`npm test` runs TypeScript checks, unit tests, and Playwright product journeys
+`npm test` runs TypeScript checks, narrow contract tests, and Playwright product journeys
 against the real generated extension and a deterministic local model service.
 It does not send real model requests.
 

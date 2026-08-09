@@ -466,10 +466,15 @@ test("a reader configures a provider, translates progressively, changes reading 
 
   await expect(article.locator("html")).toHaveAttribute("data-transly-article-status", "translated");
   await expect(article.locator(".transly-loading")).toHaveCount(0);
-  await expect(article.locator(".transly-translation:not(.transly-loading)")).toHaveCount(5);
+  await expect(article.locator(".transly-translation:not(.transly-loading)")).toHaveCount(9);
   await expect(article.locator(".transly-translation a[href='https://example.com/reference']")).toBeVisible();
   await expect(article.locator(".transly-translation .edit-control a[href='https://auth.example.com/edit'] svg")).toBeVisible();
   await expect(article.locator(".transly-translation a.reference-icon[href='https://example.com/reference-icon'] svg")).toBeVisible();
+  await expect(article.locator("#direct-table-cell > .transly-translation")).toBeVisible();
+  await expect(article.locator("#grid-source > .transly-translation")).toBeVisible();
+  await expect(article.locator(".comparison-grid > .transly-translation")).toHaveCount(0);
+  await expect(article.locator("#protected-code .transly-translation")).toHaveCount(0);
+  await expect(article.locator("#protected-formula .transly-translation")).toHaveCount(0);
   const translatedText = await article.locator(".transly-translation").allTextContents();
   expect(translatedText.join(" ")).not.toContain("https://auth.example.com/edit");
   expect(translatedText.join(" ")).not.toContain("https://example.com/reference-icon");
@@ -611,7 +616,7 @@ test("a provider failure is visible and the reader can retry without reloading t
   await expect(failedPopup.locator("#status")).toContainText("Could not reach the translation service");
   await failedPopup.locator("#translateArticle").click();
   await expect(article.locator("html")).toHaveAttribute("data-transly-article-status", "translated");
-  await expect(article.locator(".transly-translation:not(.transly-loading)")).toHaveCount(5);
+  await expect(article.locator(".transly-translation:not(.transly-loading)")).toHaveCount(9);
   expect(provider.translationRequests()).toHaveLength(2);
 });
 
