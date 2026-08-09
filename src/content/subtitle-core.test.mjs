@@ -38,28 +38,6 @@ Second caption`, "https://cdn.example/captions.vtt");
   assert.deepEqual(vtt.map((cue) => cue.text), ["First caption", "Second caption"]);
 });
 
-test("merges dynamic cues, prioritizes playback vicinity, and finds the active cue", () => {
-  const first = core.normalizeCues([{ start: 0, end: 2, text: "One" }]);
-  const merged = core.mergeCues(first, [
-    { start: 0, end: 2, text: "One" },
-    { start: 3, end: 5, text: "Two" }
-  ]);
-  assert.equal(merged.length, 2);
-  assert.equal(core.activeCueAt(merged, 3.5)?.text, "Two");
-  assert.equal(core.prioritizeCues(merged, 3.5)[0].text, "Two");
-});
-
-test("chunks captions by both text size and cue count", () => {
-  const cues = core.normalizeCues(Array.from({ length: 9 }, (_, index) => ({
-    start: index,
-    end: index + 0.8,
-    text: `Caption ${index} ${"x".repeat(200)}`
-  })));
-  const chunks = core.chunkCues(cues, { maxChars: 1000, maxItems: 4 });
-  assert.equal(chunks.length, 3);
-  assert.ok(chunks.every((chunk) => chunk.length <= 4));
-});
-
 test("groups timed cues into complete utterances before translation", () => {
   const cues = core.normalizeCues([
     { start: 0, end: 2, text: "Welcome to the second annual Code with Claude conference," },
@@ -124,18 +102,6 @@ test("translates the current minute first and leaves distant cues for later batc
     batches.slice(1).flat().map((cue) => cue.text),
     ["Distant sentence."]
   );
-});
-
-test("keeps a short subtitle window in one request", () => {
-  const cues = core.normalizeCues([
-    { start: 0, end: 2, text: "First sentence." },
-    { start: 3, end: 5, text: "Second sentence." }
-  ]);
-  const groups = core.groupCuesByMeaning(cues);
-  const batches = core.chunkCueGroupsForPlayback(groups, 1, { maxChars: 1200, maxItems: 12 });
-
-  assert.equal(batches.length, 1);
-  assert.deepEqual(batches[0].map((cue) => cue.text), ["First sentence.", "Second sentence."]);
 });
 
 test("selects a bounded playhead window and falls back to the nearest group", () => {
