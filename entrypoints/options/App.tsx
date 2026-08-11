@@ -1,9 +1,11 @@
 import { Combobox } from "@base-ui/react/combobox";
 import { Select } from "@base-ui/react/select";
 import { Check, ChevronDown, Eye, EyeOff, LoaderCircle, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { sendRuntimeMessage, splitModelName } from "../../src/ui/extension-api";
+import { interfaceLanguageItems } from "../../src/ui/i18n";
+import { useInterfaceLanguage } from "../../src/ui/use-interface-language";
 
 type Protocol = "auto" | "responses" | "chat-completions";
 type ProviderConfig = { apiUrl: string; apiKey: string; model: string; protocol: Protocol };
@@ -31,13 +33,9 @@ type DiagnosticEvent = {
   subtitleCurrentCueState: string;
 };
 
-const PROTOCOLS = [
-  { value: "auto", label: "Auto detect" },
-  { value: "responses", label: "Responses API" },
-  { value: "chat-completions", label: "Chat Completions" }
-] as const;
-
 export function App() {
+  const { language, preference, settingsReady, setUiLanguage, t } = useInterfaceLanguage();
+  const initialized = useRef(false);
   const debugMode = new URLSearchParams(globalThis.location?.search || "").get("debug") === "1";
   const [apiUrl, setApiUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -64,6 +62,12 @@ export function App() {
 
   const selectedModel = manualModel ? customModel.trim() : model.trim();
   const connection = useMemo(() => ({ apiUrl, apiKey, protocol }), [apiKey, apiUrl, protocol]);
+  const uiLanguageItems = useMemo(() => interfaceLanguageItems(language), [language]);
+  const protocols = useMemo(() => [
+    { value: "auto", label: t("autoDetect") },
+    { value: "responses", label: "Responses API" },
+    { value: "chat-completions", label: "Chat Completions" }
+  ], [t]);
 
   const showStatus = useCallback((message: string, tone: StatusTone = "neutral") => {
     setStatus(message);
@@ -94,11 +98,11 @@ export function App() {
 
   const connectLaneProvider = useCallback(async ({ quiet = false } = {}) => {
     setLaneBusy(true);
-    if (!quiet) showStatus("Connecting to Lane…");
+    if (!quiet) showStatus(t("connectingLane"));
     const response = await sendRuntimeMessage<any>({ type: "TRANSLY_CONNECT_LANE" });
     setLaneBusy(false);
     if (!response.ok) {
-      if (!quiet) showStatus(response.error || "Lane is not available.", "error");
+      if (!quiet) showStatus(response.error || t("laneUnavailable"), "error");
       return false;
     }
     const config = response.data.config as ProviderConfig;
@@ -108,17 +112,19 @@ export function App() {
     updateModelChoices(response.data.models || [], config.model);
     setModelCatalogLoaded(true);
     setSavedConfiguration(true);
-    showStatus(`Connected to Lane with ${config.model}.`, "success");
+    showStatus(t("connectedLane", { model: config.model }), "success");
     return true;
-  }, [showStatus, updateModelChoices]);
+  }, [showStatus, t, updateModelChoices]);
 
   useEffect(() => {
+    if (!settingsReady || initialized.current) return;
+    initialized.current = true;
     let active = true;
     sendRuntimeMessage<ProviderConfig>({ type: "TRANSLY_GET_PROVIDER_SETTINGS" })
       .then(async (response) => {
         if (!active) return;
         if (!response.ok || !response.data) {
-          showStatus(response.error || "Could not load settings.", "error");
+          showStatus(response.error || t("settingsLoadFailed"), "error");
           return;
         }
         const config = response.data;
@@ -152,7 +158,7 @@ export function App() {
         document.documentElement.dataset.translyOptionsReady = "true";
       });
     return () => { active = false; };
-  }, [connectLaneProvider, showStatus, updateModelChoices]);
+  }, [connectLaneProvider, settingsReady, showStatus, t, updateModelChoices]);
 
   const refreshDiagnostics = useCallback(async () => {
     setDiagnosticsBusy(true);
@@ -209,13 +215,13 @@ export function App() {
     });
     return response.ok
       ? { ok: true as const, models: response.data?.models || [] }
-      : { ok: false as const, error: response.error || "Could not connect to this service." };
+      : { ok: false as const, error: response.error || t("connectServiceFailed") };
   }
 
   async function refreshModels({ quiet = false } = {}) {
     if (!apiUrl.trim()) return;
     setBusy("models");
-    if (!quiet) showStatus("Loading available models…");
+    if (!quiet) showStatus(t("loadingModels"));
     const result = await requestModels();
     setBusy("");
     if (!result.ok) {
@@ -230,24 +236,24 @@ export function App() {
     setModelCatalogLoaded(true);
     if (!quiet) {
       showStatus(result.models.length
-        ? `Loaded ${result.models.length} available model${result.models.length === 1 ? "" : "s"}.`
-        : "Connected, but this service did not return a model list.", result.models.length ? "success" : "neutral");
+        ? t("loadedModels", { count: result.models.length })
+        : t("connectedNoModels"), result.models.length ? "success" : "neutral");
     }
   }
 
   async function saveConfiguration(verified: boolean, modelOverride = selectedModel) {
-    showStatus(verified ? "Saving translation service…" : "Saving without connection verification…");
+    showStatus(verified ? t("savingService") : t("savingWithoutTest"));
     const response = await sendRuntimeMessage({
       type: "TRANSLY_SAVE_PROVIDER_SETTINGS",
       payload: { ...connection, model: modelOverride }
     });
     if (!response.ok) {
-      showStatus(response.error || "Could not save settings.", "error");
+      showStatus(response.error || t("settingsSaveFailed"), "error");
       return false;
     }
     setSavedConfiguration(true);
     setShowSaveWithoutTest(false);
-    showStatus(verified ? "Translation service connected." : "Translation service saved without testing.", "success");
+    showStatus(verified ? t("serviceConnected") : t("serviceSaved"), "success");
     return true;
   }
 
@@ -256,7 +262,7 @@ export function App() {
     if (!apiUrl.trim()) return;
     setBusy("connect");
     setShowSaveWithoutTest(false);
-    showStatus("Connecting to the translation service…");
+    showStatus(t("connectingService"));
     const result = await requestModels();
     if (!result.ok) {
       setManualModel(true);
@@ -272,7 +278,7 @@ export function App() {
     if (!nextModel) {
       setBusy("");
       setManualModel(true);
-      showStatus("No model was listed. Enter the model name, then connect again.", "error");
+      showStatus(t("noModelListed"), "error");
       return;
     }
     await saveConfiguration(true, nextModel);
@@ -281,44 +287,44 @@ export function App() {
 
   async function testConnection() {
     if (!selectedModel) {
-      showStatus("Choose a model before testing the connection.", "error");
+      showStatus(t("chooseModelBeforeTest"), "error");
       return;
     }
     setBusy("test");
-    showStatus("Testing the translation service…");
+    showStatus(t("testingService"));
     const response = await sendRuntimeMessage<any>({
       type: "TRANSLY_TEST_PROVIDER",
       payload: { ...connection, model: selectedModel }
     });
     setBusy("");
     if (!response.ok) {
-      showStatus(response.error || "Could not connect to this service.", "error");
+      showStatus(response.error || t("connectServiceFailed"), "error");
       return;
     }
     if (response.data?.modelAvailable === false) {
-      showStatus(`Connected, but ${selectedModel} is not available from this service.`, "error");
+      showStatus(t("selectedModelUnavailable", { model: selectedModel }), "error");
       return;
     }
     showStatus(response.data?.modelCount
-      ? "Connection successful. The selected model is available."
-      : "Connection successful. This service does not expose a model list.", "success");
+      ? t("connectionSuccessful")
+      : t("connectionNoModelList"), "success");
   }
 
   async function discoverLocalProviders() {
     setDiscoveryOpen(true);
     setDiscoveryBusy(true);
-    setDiscoveryLabel("Searching…");
+    setDiscoveryLabel(t("searching"));
     setDiscoveryResults([]);
     const response = await sendRuntimeMessage<LocalProvider[]>({ type: "TRANSLY_DISCOVER_LOCAL_PROVIDERS" });
     setDiscoveryBusy(false);
     if (!response.ok) {
-      setDiscoveryLabel("Search failed");
-      showStatus(response.error || "Could not search for local services.", "error");
+      setDiscoveryLabel(t("searchFailed"));
+      showStatus(response.error || t("searchLocalServicesFailed"), "error");
       return;
     }
     const results = response.data || [];
     setDiscoveryResults(results);
-    setDiscoveryLabel(results.length ? `${results.length} found` : "None found");
+    setDiscoveryLabel(results.length ? t("foundCount", { count: results.length }) : t("noneFound"));
   }
 
   function chooseLocalProvider(result: LocalProvider) {
@@ -328,8 +334,8 @@ export function App() {
     updateModelChoices(result.models || []);
     setModelCatalogLoaded(true);
     showStatus(result.authRequired
-      ? "Local service selected. Enter its API key, then connect."
-      : "Local service selected. Confirm the model, then connect.", result.authRequired ? "neutral" : "success");
+      ? t("localSelectedNeedsKey")
+      : t("localSelected"), result.authRequired ? "neutral" : "success");
   }
 
   function useOpenAI() {
@@ -337,50 +343,80 @@ export function App() {
     setApiKey("");
     setProtocol("auto");
     resetModelChoices();
-    showStatus("OpenAI API selected. Add your API key, then connect.");
+    showStatus(t("openAiSelected"));
   }
 
   const modelHint = busy === "models" && !modelCatalogLoaded
-    ? "Loading available models…"
+    ? t("loadingModels")
     : modelCatalogLoaded && models.length
-    ? `${models.length} available model${models.length === 1 ? "" : "s"}. Choose one from the list.`
+    ? models.length === 1 ? t("oneAvailableModel") : t("availableModels", { count: models.length })
     : models.length
-      ? "Current model selected. Reload the available model list."
+      ? t("currentModelSelected")
     : manualModel
-      ? "Enter the provider model name exactly as the service exposes it."
-      : "Load models to choose from those available to this service.";
+      ? t("enterExactModel")
+      : t("loadModelsHint");
 
   return (
     <main className="settings-shell">
+      <section className="interface-settings" aria-labelledby="interfaceHeading">
+        <div className="section-heading">
+          <h2 id="interfaceHeading">{t("interfaceHeading")}</h2>
+          <p>{t("interfaceDescription")}</p>
+        </div>
+        <Select.Root items={uiLanguageItems} value={preference} onValueChange={async (value) => {
+          showStatus("");
+          await setUiLanguage(value);
+        }}>
+          <Select.Trigger id="settingsUiLanguage" className="interface-language-trigger" aria-label={t("interfaceLanguage")}>
+            <Select.Value />
+            <Select.Icon className="control-icon"><ChevronDown size={17} /></Select.Icon>
+          </Select.Trigger>
+          <Select.Portal>
+            <Select.Positioner className="combobox-positioner" align="end" sideOffset={5}>
+              <Select.Popup className="protocol-popup interface-language-popup">
+                <Select.List className="protocol-list">
+                  {uiLanguageItems.map((item) => (
+                    <Select.Item className="protocol-option settings-interface-option" data-value={item.value} key={item.value} value={item.value}>
+                      <Select.ItemIndicator><Check size={15} /></Select.ItemIndicator>
+                      <Select.ItemText>{item.label}</Select.ItemText>
+                    </Select.Item>
+                  ))}
+                </Select.List>
+              </Select.Popup>
+            </Select.Positioner>
+          </Select.Portal>
+        </Select.Root>
+      </section>
+
       <section className="quick-setup" aria-labelledby="quickSetupHeading">
         <div className="section-heading">
-          <h2 id="quickSetupHeading">Quick setup</h2>
-          <p>Use Lane, find another local service, or connect the OpenAI API.</p>
+          <h2 id="quickSetupHeading">{t("quickSetup")}</h2>
+          <p>{t("quickSetupDescription")}</p>
         </div>
         <div className="quick-actions">
           <button id="connectLane" className="setup-action setup-action-primary" type="button" disabled={laneBusy} onClick={() => connectLaneProvider()}>
-            <strong>{laneBusy ? "Connecting Lane…" : "Connect Lane"}</strong>
-            <span>Use local AI providers automatically</span>
+            <strong>{laneBusy ? t("connectingLane") : t("connectLane")}</strong>
+            <span>{t("connectLaneDescription")}</span>
           </button>
           <button id="discoverLocal" className="setup-action" type="button" disabled={discoveryBusy} onClick={discoverLocalProviders}>
-            <strong>Find local services</strong>
-            <span>Check common compatible ports</span>
+            <strong>{t("findLocalServices")}</strong>
+            <span>{t("findLocalServicesDescription")}</span>
           </button>
           <button id="useOpenAI" className="setup-action" type="button" onClick={useOpenAI}>
-            <strong>Use OpenAI API</strong>
-            <span>Start with the official endpoint</span>
+            <strong>{t("useOpenAiApi")}</strong>
+            <span>{t("useOpenAiDescription")}</span>
           </button>
         </div>
 
         {discoveryOpen && (
           <div id="discoveryPanel" className="discovery-panel">
-            <div className="discovery-heading"><strong>Local services</strong><span id="discoveryStatus">{discoveryLabel}</span></div>
+            <div className="discovery-heading"><strong>{t("localServices")}</strong><span id="discoveryStatus">{discoveryLabel}</span></div>
             <div id="localResults" className="local-results">
-              {!discoveryBusy && !discoveryResults.length && <p className="discovery-empty">No compatible service was found on the common local ports.</p>}
+              {!discoveryBusy && !discoveryResults.length && <p className="discovery-empty">{t("noCompatibleService")}</p>}
               {discoveryResults.map((result) => (
                 <button className="local-result" type="button" key={result.apiUrl} onClick={() => chooseLocalProvider(result)}>
-                  <span className="local-result-copy"><strong>{result.hint || "Local API"}</strong><span>{result.apiUrl}</span></span>
-                  <span className="local-result-detail">{result.authRequired ? "API key required" : `${result.models?.length || 0} models`}</span>
+                  <span className="local-result-copy"><strong>{result.hint || t("localApi")}</strong><span>{result.apiUrl}</span></span>
+                  <span className="local-result-detail">{result.authRequired ? t("apiKeyRequired") : t("modelCount", { count: result.models?.length || 0 })}</span>
                 </button>
               ))}
             </div>
@@ -390,24 +426,24 @@ export function App() {
 
       <form id="providerForm" className="provider-form" onSubmit={submit}>
         <label className="field" htmlFor="apiUrl">
-          <span>API URL</span>
+          <span>{t("apiUrl")}</span>
           <input id="apiUrl" name="apiUrl" type="url" spellCheck={false} autoComplete="url" placeholder="https://api.openai.com/v1" required value={apiUrl} onChange={(event) => { setApiUrl(event.target.value); resetModelChoices(); }} />
-          <small>Enter a base URL or a complete Responses or Chat Completions endpoint.</small>
+          <small>{t("apiUrlHelp")}</small>
         </label>
 
         <label className="field" htmlFor="apiKey">
-          <span>API key</span>
+          <span>{t("apiKey")}</span>
           <span className="password-input">
-            <input id="apiKey" name="apiKey" type={showKey ? "text" : "password"} spellCheck={false} autoComplete="off" placeholder="Optional" value={apiKey} onChange={(event) => { setApiKey(event.target.value); resetModelChoices(); }} />
-            <button id="toggleApiKey" type="button" aria-label={showKey ? "Hide API key" : "Show API key"} onClick={() => setShowKey((value) => !value)}>
+            <input id="apiKey" name="apiKey" type={showKey ? "text" : "password"} spellCheck={false} autoComplete="off" placeholder={t("optional")} value={apiKey} onChange={(event) => { setApiKey(event.target.value); resetModelChoices(); }} />
+            <button id="toggleApiKey" type="button" aria-label={showKey ? t("hideApiKey") : t("showApiKey")} onClick={() => setShowKey((value) => !value)}>
               {showKey ? <EyeOff size={18} /> : <Eye size={18} />}
             </button>
           </span>
-          <small>Leave empty only when the service requires no key. Stored in Chrome local storage.</small>
+          <small>{t("apiKeyHelp")}</small>
         </label>
 
         <div className="field">
-          <label id="modelLabel">Model</label>
+          <label id="modelLabel">{t("model")}</label>
           <div className="model-input-row">
             <Combobox.Root
               items={models}
@@ -422,7 +458,7 @@ export function App() {
             >
               <Combobox.Trigger id="modelTrigger" className="model-trigger" aria-labelledby="modelLabel">
                 <span id="modelValue" className={!selectedModel ? "is-placeholder" : ""}>
-                  {selectedModel ? splitModelName(selectedModel).name : models.length ? "Choose a model" : "Connect to load available models"}
+                  {selectedModel ? splitModelName(selectedModel).name : models.length ? t("chooseModel") : t("connectToLoadModels")}
                 </span>
                 <Combobox.Icon className="control-icon"><ChevronDown size={17} /></Combobox.Icon>
               </Combobox.Trigger>
@@ -431,7 +467,7 @@ export function App() {
                   <Combobox.Popup id="modelPopover" className="combobox-popup">
                     <div className="combobox-search">
                       <Search size={16} />
-                      <Combobox.Input id="modelSearch" aria-label="Search available models" placeholder="Search models" />
+                      <Combobox.Input id="modelSearch" aria-label={t("searchModels")} placeholder={t("searchModels")} />
                     </div>
                     <Combobox.List id="modelList" className="combobox-list">
                       {models.map((value) => {
@@ -447,26 +483,26 @@ export function App() {
                         );
                       })}
                     </Combobox.List>
-                    <Combobox.Empty className="model-empty">No matching models</Combobox.Empty>
-                    <button id="manualModel" className="model-manual" type="button" onClick={() => setManualModel(true)}>Enter a model name manually…</button>
+                    <Combobox.Empty className="model-empty">{t("noMatchingModels")}</Combobox.Empty>
+                    <button id="manualModel" className="model-manual" type="button" onClick={() => setManualModel(true)}>{t("enterModelManually")}</button>
                   </Combobox.Popup>
                 </Combobox.Positioner>
               </Combobox.Portal>
             </Combobox.Root>
             <button id="loadModels" className="inline-action" type="button" disabled={Boolean(busy)} onClick={() => refreshModels()}>
-              {busy === "models" ? <><LoaderCircle className="spin" size={16} /> Loading</> : "Load models"}
+              {busy === "models" ? <><LoaderCircle className="spin" size={16} /> {t("loading")}</> : t("loadModels")}
             </button>
           </div>
-          {manualModel && <input id="customModel" className="custom-model" type="text" spellCheck={false} autoComplete="off" placeholder="Provider model name" value={customModel} onChange={(event) => setCustomModel(event.target.value)} />}
+          {manualModel && <input id="customModel" className="custom-model" type="text" spellCheck={false} autoComplete="off" placeholder={t("providerModelName")} value={customModel} onChange={(event) => setCustomModel(event.target.value)} />}
           <small id="modelHint">{modelHint}</small>
         </div>
 
         <details className="advanced-settings">
-          <summary>Advanced</summary>
+          <summary>{t("advanced")}</summary>
           <div className="field compact">
-            <span>API format</span>
-            <Select.Root items={PROTOCOLS} value={protocol} onValueChange={(value) => { if (value) { setProtocol(value as Protocol); resetModelChoices(); } }}>
-              <Select.Trigger id="protocol" className="protocol-trigger" aria-label="API format">
+            <span>{t("apiFormat")}</span>
+            <Select.Root items={protocols} value={protocol} onValueChange={(value) => { if (value) { setProtocol(value as Protocol); resetModelChoices(); } }}>
+              <Select.Trigger id="protocol" className="protocol-trigger" aria-label={t("apiFormat")}>
                 <Select.Value />
                 <Select.Icon className="control-icon"><ChevronDown size={17} /></Select.Icon>
               </Select.Trigger>
@@ -474,7 +510,7 @@ export function App() {
                 <Select.Positioner className="combobox-positioner" align="start" sideOffset={5}>
                   <Select.Popup className="protocol-popup">
                     <Select.List className="protocol-list">
-                      {PROTOCOLS.map((item) => (
+                      {protocols.map((item) => (
                         <Select.Item className="protocol-option" key={item.value} value={item.value}>
                           <Select.ItemIndicator><Check size={15} /></Select.ItemIndicator>
                           <Select.ItemText>{item.label}</Select.ItemText>
@@ -491,9 +527,9 @@ export function App() {
         <div className="form-footer">
           <p id="providerStatus" className="provider-status" data-tone={statusTone} role="status" aria-live="polite">{status}</p>
           <div className="form-actions">
-            {showSaveWithoutTest && <button id="saveWithoutTest" className="secondary-action" type="button" disabled={Boolean(busy)} onClick={async () => { setBusy("connect"); await saveConfiguration(false); setBusy(""); }}>Save without testing</button>}
-            <button id="testProvider" className="secondary-action" type="button" disabled={Boolean(busy)} onClick={testConnection}>{busy === "test" ? "Testing…" : "Test connection"}</button>
-            <button id="connectProvider" className="primary-action" type="submit" disabled={Boolean(busy)}>{busy === "connect" ? "Connecting…" : savedConfiguration ? "Save changes" : "Connect"}</button>
+            {showSaveWithoutTest && <button id="saveWithoutTest" className="secondary-action" type="button" disabled={Boolean(busy)} onClick={async () => { setBusy("connect"); await saveConfiguration(false); setBusy(""); }}>{t("saveWithoutTesting")}</button>}
+            <button id="testProvider" className="secondary-action" type="button" disabled={Boolean(busy)} onClick={testConnection}>{busy === "test" ? t("testing") : t("testConnection")}</button>
+            <button id="connectProvider" className="primary-action" type="submit" disabled={Boolean(busy)}>{busy === "connect" ? t("connecting") : savedConfiguration ? t("saveChanges") : t("connect")}</button>
           </div>
         </div>
       </form>

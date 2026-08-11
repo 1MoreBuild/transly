@@ -1,13 +1,15 @@
 import { Select } from "@base-ui/react/select";
 import { ArrowLeftRight, Check, ChevronDown, LoaderCircle, Settings2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   filterTranslationModels,
   sendRuntimeMessage,
   splitModelName,
   TARGET_LANGUAGES
 } from "../../src/ui/extension-api";
+import { interfaceLanguageItems, type MessageKey } from "../../src/ui/i18n";
 import { resolveActiveArticleTarget, sendToActiveTab, sendToTabFrame } from "../../src/ui/popup-tab";
+import { useInterfaceLanguage } from "../../src/ui/use-interface-language";
 
 type ArticleStatus = "idle" | "running" | "translated" | "error";
 type ProviderSummary = {
@@ -22,6 +24,8 @@ type ProviderSummary = {
 const sourceTabId = Number(new URLSearchParams(location.search).get("tabId") || 0);
 
 export function App() {
+  const { language, preference, settings, settingsReady, setUiLanguage, t } = useInterfaceLanguage();
+  const initialized = useRef(false);
   const [targetLanguage, setTargetLanguage] = useState("zh-CN");
   const [displayMode, setDisplayMode] = useState("bilingual");
   const [provider, setProvider] = useState<ProviderSummary>({});
@@ -38,23 +42,21 @@ export function App() {
   const providerConfigured = Boolean(provider.configured);
   const providerAvailable = provider.available !== false;
   const providerState = !providerChecked
-    ? "Checking"
+    ? t("checking")
     : !providerConfigured
-      ? "Setup required"
-      : providerAvailable ? "Ready" : "Offline";
+      ? t("setupRequired")
+      : providerAvailable ? t("ready") : t("offline");
   const engineState = providerConfigured && providerAvailable ? "ready" : "error";
+  const uiLanguageItems = useMemo(() => interfaceLanguageItems(language), [language]);
 
   useEffect(() => {
+    if (!settingsReady || initialized.current) return;
+    initialized.current = true;
     let active = true;
-    Promise.all([
-      sendRuntimeMessage<any>({ type: "TRANSLY_GET_SETTINGS" }),
-      loadPageState()
-    ]).then(async ([settings, pageState]) => {
+    loadPageState().then(async (pageState) => {
       if (!active) return;
-      if (settings.ok) {
-        setTargetLanguage(settings.data?.targetLanguage || "zh-CN");
-        setDisplayMode(settings.data?.articleDisplayMode || "bilingual");
-      }
+      setTargetLanguage(settings?.targetLanguage || "zh-CN");
+      setDisplayMode(settings?.articleDisplayMode || "bilingual");
       if (pageState?.ok) {
         const data = pageState.data || {};
         const nextStatus = data.articleStatus || (data.articleTranslated ? "translated" : "idle");
@@ -66,20 +68,20 @@ export function App() {
       if (!active) return;
       if (response.ok && response.data?.configured) {
         setProvider(response.data);
-        setModel(response.data.model || "Custom model");
-        if (response.data.available === false) setStatusMessage(providerUnavailableMessage(response.data));
+        setModel(response.data.model || "");
+        if (response.data.available === false) setStatusMessage(providerUnavailableMessage(response.data, t));
         else if (pageState?.data?.articleStatus === "error") {
-          setStatusMessage(articleFailureMessage(pageState.data.articleError));
+          setStatusMessage(articleFailureMessage(pageState.data.articleError, t));
         }
       } else {
         setProvider({ configured: false, available: false });
-        setModel("Not configured");
-        setStatusMessage(response.error || "Add an API URL, key, and model to begin.");
+        setModel("");
+        setStatusMessage(response.error || t("addProvider"));
       }
       setProviderChecked(true);
     });
     return () => { active = false; };
-  }, []);
+  }, [settings, settingsReady, t]);
 
   const loadModels = useCallback(async () => {
     if (!providerConfigured || modelsLoaded || modelsLoading) return;
@@ -90,10 +92,10 @@ export function App() {
       if (response.data?.currentModel) setModel(response.data.currentModel);
       setModelsLoaded(true);
     } else {
-      setStatusMessage(response.error || "Could not load models.");
+      setStatusMessage(response.error || t("loadModelsFailed"));
     }
     setModelsLoading(false);
-  }, [modelsLoaded, modelsLoading, providerConfigured]);
+  }, [modelsLoaded, modelsLoading, providerConfigured, t]);
 
   async function selectModel(value: string | null) {
     if (!value || value === model) return;
@@ -105,7 +107,7 @@ export function App() {
     });
     if (!response.ok) {
       setModel(previous);
-      setStatusMessage(response.error || "Could not switch models.");
+      setStatusMessage(response.error || t("switchModelFailed"));
       return;
     }
     setProvider(response.data || provider);
@@ -117,6 +119,11 @@ export function App() {
     setTargetLanguage(value);
     setStatusMessage("");
     await sendRuntimeMessage({ type: "TRANSLY_SAVE_SETTINGS", payload: { targetLanguage: value } });
+  }
+
+  async function changeInterfaceLanguage(value: string | null) {
+    setStatusMessage("");
+    await setUiLanguage(value);
   }
 
   async function toggleDisplayMode() {
@@ -139,7 +146,7 @@ export function App() {
       setArticleStatus("running");
       try {
         const response = await sendToActiveTab({ type: "TRANSLY_CLEAR_ARTICLE" }, sourceTabId);
-        if (response?.ok === false) throw new Error(response.error || "Could not restore the original article");
+        if (response?.ok === false) throw new Error(response.error || t("restoreFailed"));
         setHasTranslation(false);
         setArticleStatus("idle");
       } catch (error) {
@@ -157,7 +164,7 @@ export function App() {
         targetLanguage,
         articleDisplayMode: displayMode
       }, sourceTabId);
-      if (response?.ok === false) throw new Error(response.error || "Translation failed");
+      if (response?.ok === false) throw new Error(response.error || t("translationFailed"));
       setTimeout(() => window.close(), 240);
     } catch (error) {
       setArticleStatus("idle");
@@ -166,26 +173,26 @@ export function App() {
   }
 
   const modelItems = useMemo(() => {
-    const values = models.length ? models : model && model !== "Not configured" ? [model] : [];
+    const values = models.length ? models : model ? [model] : [];
     return values.map((value) => ({ value, label: splitModelName(value).name }));
   }, [model, models]);
   const running = articleStatus === "running";
   const primaryLabel = running
-    ? "Translating..."
-    : hasTranslation ? "Restore" : "Translate";
+    ? t("translating")
+    : hasTranslation ? t("restore") : t("translate");
   const primaryAriaLabel = running
-    ? "Article translation in progress"
-    : hasTranslation ? "Restore original article" : "Translate this article";
+    ? t("translationInProgress")
+    : hasTranslation ? t("restoreOriginalArticle") : t("translateArticle");
   const providerIcon = provider.provider?.icon
     ? chrome.runtime.getURL(provider.provider.icon)
     : "";
 
   return (
     <main className="popup-shell">
-      <section className="language-section" aria-label="Target language">
-        <span className="section-label">Translate to</span>
+      <section className="language-section" aria-label={t("targetLanguage")}>
+        <span className="section-label">{t("translateTo")}</span>
         <Select.Root items={TARGET_LANGUAGES} value={targetLanguage} onValueChange={changeLanguage}>
-          <Select.Trigger id="targetLanguage" className="compact-select" aria-label="Target language">
+          <Select.Trigger id="targetLanguage" className="compact-select" aria-label={t("targetLanguage")}>
             <Select.Value />
             <Select.Icon className="select-chevron"><ChevronDown size={16} /></Select.Icon>
           </Select.Trigger>
@@ -219,7 +226,7 @@ export function App() {
       </section>
 
       <section id="engineRow" className="engine-row" data-state={providerChecked ? engineState : "checking"}>
-        <div className="provider-mark" role="img" aria-label={provider.provider?.name || "AI provider"}>
+        <div className="provider-mark" role="img" aria-label={provider.provider?.name || t("aiProvider")}>
           {providerIcon
             ? <img id="providerIcon" src={providerIcon} alt="" />
             : <span id="providerFallback" aria-hidden="true">AI</span>}
@@ -232,8 +239,8 @@ export function App() {
             onOpenChange={(open) => { if (open) void loadModels(); }}
             disabled={!providerConfigured}
           >
-            <Select.Trigger id="popupModelTrigger" className="model-select" aria-label="Translation model">
-              <strong id="modelValue">{splitModelName(model || "Checking…").name}</strong>
+            <Select.Trigger id="popupModelTrigger" className="model-select" aria-label={t("translationModel")}>
+              <strong id="modelValue">{splitModelName(model || (providerChecked ? t("notConfigured") : t("checking"))).name}</strong>
               {modelsLoading
                 ? <LoaderCircle className="spin" size={14} />
                 : <Select.Icon className="select-chevron"><ChevronDown size={15} /></Select.Icon>}
@@ -265,7 +272,7 @@ export function App() {
                         </Select.Item>
                       );
                     })}
-                    {modelsLoaded && !modelItems.length && <p className="select-empty">No text models available.</p>}
+                    {modelsLoaded && !modelItems.length && <p className="select-empty">{t("noTextModels")}</p>}
                   </Select.List>
                 </Select.Popup>
               </Select.Positioner>
@@ -273,17 +280,52 @@ export function App() {
           </Select.Root>
           <div className="provider-meta">
             <span className="provider-status-dot" aria-hidden="true" />
-            <span id="providerValue">{provider.provider?.name || "AI provider"}</span>
+            <span id="providerValue">{provider.provider?.name || t("aiProvider")}</span>
             <span aria-hidden="true">·</span>
             <span id="providerState">{providerState}</span>
           </div>
         </div>
+        <Select.Root items={uiLanguageItems} value={preference} onValueChange={changeInterfaceLanguage}>
+          <Select.Trigger
+            id="popupUiLanguage"
+            className="interface-language-select"
+            aria-label={t("interfaceLanguage")}
+            title={t("interfaceLanguage")}
+          >
+            <span aria-hidden="true">{language === "zh-CN" ? "中" : "EN"}</span>
+          </Select.Trigger>
+          <Select.Portal>
+            <Select.Positioner
+              className="select-positioner"
+              align="end"
+              alignItemWithTrigger={false}
+              collisionPadding={8}
+              sideOffset={7}
+            >
+              <Select.Popup className="select-popup interface-language-popup">
+                <Select.List className="select-list">
+                  {uiLanguageItems.map((item) => (
+                    <Select.Item
+                      className="select-item interface-language-option"
+                      data-value={item.value}
+                      key={item.value}
+                      value={item.value}
+                    >
+                      <Select.ItemIndicator className="select-check"><Check size={15} /></Select.ItemIndicator>
+                      <Select.ItemText>{item.label}</Select.ItemText>
+                    </Select.Item>
+                  ))}
+                </Select.List>
+              </Select.Popup>
+            </Select.Positioner>
+          </Select.Portal>
+        </Select.Root>
         <button
           id="configureProvider"
           className="icon-button"
           type="button"
-          aria-label="Open translation settings"
-          title="Translation settings"
+          aria-label={t("translationSettings")}
+          title={t("translationSettings")}
           onClick={() => chrome.runtime.openOptionsPage()}
         >
           <Settings2 size={18} />
@@ -299,15 +341,15 @@ export function App() {
               type="button"
               data-mode={displayMode}
               aria-label={displayMode === "bilingual"
-                ? "Bilingual view. Switch to translation only."
-                : "Translation only. Switch to bilingual view."}
-              title={displayMode === "bilingual" ? "Switch to translation only" : "Switch to bilingual view"}
+                ? t("bilingualViewLabel")
+                : t("translationViewLabel")}
+              title={displayMode === "bilingual" ? t("switchTranslationOnly") : t("switchBilingual")}
               onClick={toggleDisplayMode}
             >
               <span className="display-mode-glyph" aria-hidden="true">
                 {displayMode === "bilingual" ? "文A" : "文"}
               </span>
-              <span>{displayMode === "bilingual" ? "Bilingual" : "Translation"}</span>
+              <span>{displayMode === "bilingual" ? t("bilingual") : t("translationOnly")}</span>
               <ArrowLeftRight className="display-mode-swap" size={13} aria-hidden="true" />
             </button>
           )}
@@ -347,18 +389,18 @@ function normalizeArticleStatus(value: string): ArticleStatus {
     : "idle";
 }
 
-function providerUnavailableMessage(summary: ProviderSummary) {
+function providerUnavailableMessage(summary: ProviderSummary, t: (key: MessageKey) => string) {
   const host = String(summary?.host || "").toLowerCase();
   if (host.includes("127.0.0.1") || host.includes("localhost") || host.includes("[::1]")) {
-    return "Local translation service is offline. Start Lane or your provider, then try again.";
+    return t("localProviderOffline");
   }
-  return "Translation service is unavailable. Check the provider connection, then try again.";
+  return t("providerUnavailable");
 }
 
-function articleFailureMessage(error: unknown) {
+function articleFailureMessage(error: unknown, t: (key: MessageKey) => string) {
   const message = String(error || "").toLowerCase();
   if (/(failed to fetch|fetch failed|network|connection|econnrefused|503)/.test(message)) {
-    return "Could not reach the translation service. Start it and try again.";
+    return t("providerUnreachable");
   }
-  return "Translation failed. Try again, or check the provider settings.";
+  return t("retryOrCheckSettings");
 }

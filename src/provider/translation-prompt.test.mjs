@@ -20,6 +20,16 @@ test("translation input excludes transport ids and page metadata", () => {
   assert.doesNotMatch(request.prompt, /Items JSON|JSON shape|placeholder integrity/i);
 });
 
+test("article instructions retain the editorial translation contract", () => {
+  const { instructions, prompt } = buildTranslationRequest(payload);
+  assert.match(instructions, /native Simplified Chinese editorial translator/i);
+  assert.match(instructions, /Translate meaning rather than source-language sentence structure/i);
+  assert.match(instructions, /Preserve facts, nuance, emphasis, tone, and the author's voice/i);
+  assert.match(instructions, /terminology practitioners actually use/i);
+  assert.match(instructions, /silently edit every passage as a native Simplified Chinese editor/i);
+  assert.match(prompt, /CONTEXT\nBetter Models: Worse Tools/);
+});
+
 test("passage separator cannot collide with article text", () => {
   const request = buildTranslationRequest({
     ...payload,

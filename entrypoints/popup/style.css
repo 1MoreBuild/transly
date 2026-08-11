@@ -71,6 +71,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .compact-select:focus-visible,
 .model-select:focus-visible,
+.interface-language-select:focus-visible,
 .icon-button:focus-visible,
 .display-mode-action:focus-visible,
 .primary-action:focus-visible {
@@ -171,7 +172,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .provider-mark img { width: 20px; height: 20px; }
 .provider-mark span { font-size: 10px; font-weight: 750; }
 .engine-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
-.model-select { width: fit-content; max-width: 230px; padding: 0; text-align: left; }
+.model-select { width: fit-content; max-width: 178px; padding: 0; text-align: left; }
 .model-select:disabled { cursor: default; }
 .model-select strong { overflow: hidden; font-size: 14px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
 .provider-meta { display: flex; min-width: 0; align-items: center; gap: 4px; overflow: hidden; color: var(--muted); font-size: 10px; font-weight: 600; white-space: nowrap; }
@@ -186,6 +187,25 @@ button { -webkit-tap-highlight-color: transparent; }
 .model-option-name, .model-option-provider { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-option-name { font-size: 12px; font-weight: 650; }
 .model-option-provider { color: var(--muted); font-size: 10px; }
+
+.interface-language-select {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 750;
+}
+.interface-language-select:hover { background: var(--surface-raised); color: var(--ink); }
+.interface-language-popup { width: 170px; }
+.interface-language-option { white-space: nowrap; }
 
 .icon-button {
   display: grid;

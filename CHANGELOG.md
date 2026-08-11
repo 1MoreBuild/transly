@@ -7,6 +7,13 @@ and Transly uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-11
+
+### Added
+
+- Added English and Simplified Chinese interface controls to the popup and
+  settings, with automatic browser-language detection and a remembered choice.
+
 ## [0.2.0] - 2026-08-09
 
 ### Added
@@ -56,6 +63,7 @@ and Transly uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Refined the popup, provider setup, translated-page styling, and installation
   documentation for the first public release.
 
-[Unreleased]: https://github.com/1MoreBuild/transly/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/1MoreBuild/transly/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/1MoreBuild/transly/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/1MoreBuild/transly/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/1MoreBuild/transly/releases/tag/v0.1.1

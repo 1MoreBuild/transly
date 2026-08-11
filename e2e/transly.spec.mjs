@@ -549,6 +549,33 @@ test("a reader switches models in the popup and the choice survives a browser re
   expect(provider.translationRequests().at(-1)?.model).toBe("openai/gpt-e2e-fast");
 });
 
+test("interface language stays in sync between the popup and settings", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  const { tabId } = await openArticle(extension, provider);
+  const popup = await openPopup(extension, tabId);
+  const options = await extension.context.newPage();
+  await options.goto(`chrome-extension://${extension.extensionId}/options.html`);
+  await expect(options.locator("html")).toHaveAttribute("data-transly-options-ready", "true");
+
+  await expect(popup.locator("#providerState")).toHaveText("Ready");
+  await popup.locator("#popupUiLanguage").click();
+  await popup.locator(".interface-language-option[data-value='zh-CN']").click();
+  await expect(popup.locator(".section-label")).toHaveText("翻译为");
+  await expect(popup.locator("#providerState")).toHaveText("可用");
+  await expect(popup.locator("#translateArticle")).toHaveText("翻译");
+  await expect(options.locator("#settingsUiLanguage")).toContainText("简体中文");
+  await expect(options.locator("#quickSetupHeading")).toHaveText("快速设置");
+
+  await options.locator("#settingsUiLanguage").click();
+  await options.locator(".settings-interface-option[data-value='en']").click();
+  await expect(options.locator("#quickSetupHeading")).toHaveText("Quick setup");
+  await expect(popup.locator(".section-label")).toHaveText("Translate to");
+  await expect(popup.locator("#providerState")).toHaveText("Ready");
+});
+
 test("the settings page automatically restores the provider model catalog", async ({
   extension,
   provider

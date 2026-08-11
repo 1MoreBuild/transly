@@ -11,6 +11,7 @@ import { connectLane } from "./provider/lane-native.js";
 import { createTranslationService } from "./provider/translation-service.js";
 
 const DEFAULT_SETTINGS = Object.freeze({
+  uiLanguage: "auto",
   targetLanguage: "zh-CN",
   articleDisplayMode: "bilingual",
   articleBatchChars: 28000,
