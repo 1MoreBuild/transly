@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
+    "capture:marketing": "node tools/capture-marketing.mjs",
     "typecheck": "tsc --noEmit",
     "postinstall": "wxt prepare",
     "package": "npm run build && node tools/package-extension.mjs",

@@ -147,6 +147,12 @@ The bilingual article scene is stored as editable HTML at
 - `transly-article-bilingual-1280x800.png` for Chrome Web Store upload;
 - `transly-article-bilingual-2560x1600.png` for high-density README display.
 
+Regenerate both files after a material popup or article-presentation change:
+
+```bash
+npm run capture:marketing
+```
+
 Do not use screenshots that expose API keys, local client keys, browser profile
 details, or private webpage content.
 
