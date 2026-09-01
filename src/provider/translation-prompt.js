@@ -17,11 +17,14 @@ const LANGUAGE_NAMES = new Map([
 export function buildTranslationRequest(payload) {
   const targetLanguage = languageName(payload.targetLanguage);
   const isSubtitle = payload.mode === "subtitle";
+  const isSelection = payload.mode === "selection";
   const sourceTexts = payload.items.map((item) => String(item.text || "").trim());
   const passageBreak = choosePassageBreak(sourceTexts);
   const instructions = isSubtitle
     ? buildSubtitleInstructions(targetLanguage, passageBreak)
-    : buildArticleInstructions(targetLanguage, passageBreak);
+    : isSelection
+      ? buildSelectionInstructions(targetLanguage, passageBreak)
+      : buildArticleInstructions(targetLanguage, passageBreak);
   const repairInstruction = payload.placeholderRepair
     ? "This is a repair retry. Before returning, verify that every [[TRANSLY_PH_n]] token from each passage appears exactly once in that passage's translation."
     : "";
@@ -97,6 +100,18 @@ function buildArticleLanguageGuidance(targetLanguage) {
     "Use direct, contemporary written Chinese with compact clauses and natural Chinese information order.",
     "Natural Chinese takes priority over retaining an English metaphor's image. For example, translate 'sent me down a rabbit hole' by its meaning, such as '让我连续深挖了两天' or '让我追查了两天'; never write '兔子洞' unless the passage is about a literal rabbit hole."
   ].join(" ");
+}
+
+function buildSelectionInstructions(targetLanguage, passageBreak) {
+  return [
+    `You are a native ${targetLanguage} translator.`,
+    `Translate only the selected text into clear, natural ${targetLanguage}.`,
+    "Use the surrounding context only to resolve meaning, references, tone, and terminology. Never translate, quote, summarize, or include the context in the output.",
+    "Preserve the selected text's meaning and tone. Do not explain it, label it, add alternatives, or add information.",
+    "For a word or short phrase, return only its concise translation. For a sentence or passage, return fluent prose.",
+    "Keep proper nouns, product and model names, code identifiers, URLs, and technical terms without an established translation unchanged.",
+    `Return only a valid JSON array of translated strings in input order, with exactly one string for each passage separated by ${passageBreak} in the input.`
+  ].join("\n");
 }
 
 function buildSubtitleInstructions(targetLanguage, passageBreak) {

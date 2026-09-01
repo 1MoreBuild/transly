@@ -1,0 +1,1 @@
+- Stop an article translation in progress while keeping passages that already finished.

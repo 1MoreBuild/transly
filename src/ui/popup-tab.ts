@@ -1,8 +1,13 @@
 const ARTICLE_FRAME_MESSAGES = new Set([
   "TRANSLY_TRANSLATE_ARTICLE",
+  "TRANSLY_CANCEL_ARTICLE",
   "TRANSLY_CLEAR_ARTICLE",
   "TRANSLY_SET_ARTICLE_DISPLAY_MODE",
   "TRANSLY_GET_PAGE_STATE"
+]);
+const SELECTION_FRAME_MESSAGES = new Set([
+  "TRANSLY_GET_SELECTION_STATE",
+  "TRANSLY_TRANSLATE_SELECTION"
 ]);
 
 type ArticleFrameInspection = {
@@ -16,8 +21,30 @@ export async function sendToActiveTab(message: { type?: string; [key: string]: u
   if (ARTICLE_FRAME_MESSAGES.has(message?.type || "")) {
     return sendToTabFrame(await resolveActiveArticleTarget(sourceTabId), message);
   }
+  if (SELECTION_FRAME_MESSAGES.has(message?.type || "")) {
+    return sendToTabFrame(await resolveActiveSelectionTarget(sourceTabId), message);
+  }
   const tabId = await resolveActiveTabId(sourceTabId);
   return chrome.tabs.sendMessage(tabId, message, { frameId: 0 });
+}
+
+export async function resolveActiveSelectionTarget(sourceTabId = 0) {
+  const tabId = await resolveActiveTabId(sourceTabId);
+  const frames = await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    func: inspectSelectionFrame
+  }).catch(() => []);
+  const candidates = frames
+    .filter((frame): frame is chrome.scripting.InjectionResult<{ textChars: number }> =>
+      Boolean(frame && Number.isInteger(frame.frameId) && frame.result))
+    .map((frame) => ({
+      tabId,
+      frameId: frame.frameId,
+      textChars: Number(frame.result?.textChars || 0)
+    }))
+    .filter((frame) => frame.textChars > 0)
+    .sort((left, right) => right.textChars - left.textChars || left.frameId - right.frameId);
+  return candidates[0] || { tabId, frameId: 0 };
 }
 
 export async function resolveActiveArticleTarget(sourceTabId = 0) {
@@ -52,6 +79,10 @@ function inspectArticleFrame() {
     translationCount: document.querySelectorAll(".transly-translation:not(.transly-loading)").length,
     articleStatus: document.documentElement.dataset.translyArticleStatus || "idle"
   };
+}
+
+function inspectSelectionFrame() {
+  return { textChars: String(window.getSelection?.()?.toString() || "").trim().length };
 }
 
 function scoreArticleFrame(frame: ArticleFrameInspection, frameId: number) {

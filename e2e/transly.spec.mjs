@@ -523,6 +523,204 @@ test("a reader configures a provider, translates progressively, changes reading 
   expect(provider.translationRequests()[0].prompt).not.toContain("https://example.com/reference-icon");
 });
 
+test("a reader hovers the selection dot and reuses its cached translation from the popup", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  const { page: article, tabId } = await openArticle(extension, provider);
+  const source = article.locator("article > p").first();
+  await source.scrollIntoViewIfNeeded();
+  await article.mouse.move(2, 2);
+
+  const selectionInfo = await source.evaluate((element) => {
+    const textNode = [...element.childNodes].find((node) => (
+      node.nodeType === Node.TEXT_NODE && node.textContent.trim()
+    ));
+    const firstCharacter = textNode.textContent.search(/\S/);
+    const lastCharacter = Math.min(
+      textNode.length,
+      firstCharacter + Math.floor(textNode.textContent.trim().length * 0.82)
+    );
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode, firstCharacter);
+    range.setEnd(textNode, lastCharacter);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    const caret = document.createRange();
+    caret.setStart(selection.focusNode, selection.focusOffset);
+    caret.collapse(true);
+    const caretRect = caret.getClientRects()[0] || caret.getBoundingClientRect();
+    const selectionRects = [...range.getClientRects()];
+    const endpoint = caretRect.height ? caretRect : selectionRects.at(-1);
+    const bounds = range.getBoundingClientRect();
+    return {
+      text: selection.toString(),
+      endpointX: caretRect.height ? endpoint.left : endpoint.right,
+      endpointBottom: endpoint.bottom,
+      rangeRight: bounds.right
+    };
+  });
+  const selectedText = selectionInfo.text.replace(/\s+/g, " ").trim();
+
+  const selectionUi = article.locator("[data-transly-selection-ui]");
+  const selectionDot = selectionUi.locator(".trigger");
+  await expect(selectionDot).toBeVisible();
+  await expect(selectionDot).toHaveAttribute("data-style", "dot");
+  await expect(selectionDot.locator("img")).toBeHidden();
+  await expect.poll(() => selectionDot.evaluate((element) => (
+    getComputedStyle(element, "::before").backgroundColor
+  ))).toBe("rgb(255, 196, 26)");
+  await expect.poll(() => selectionDot.evaluate((element) => (
+    getComputedStyle(element, "::before").boxShadow
+  ))).toBe("none");
+  const selectionDotBox = await selectionDot.boundingBox();
+  expect(selectionInfo.rangeRight - selectionInfo.endpointX).toBeGreaterThan(20);
+  expect(Math.abs(selectionDotBox.x + selectionDotBox.width / 2 - selectionInfo.endpointX)).toBeLessThan(2);
+  expect(Math.abs(selectionDotBox.y + selectionDotBox.height / 2 - selectionInfo.endpointBottom - 4)).toBeLessThan(2);
+  await selectionDot.hover();
+
+  await expect(selectionUi.locator(".panel")).toBeVisible();
+  await expect(selectionUi.locator("[data-role='body']")).toHaveText("上下文让翻译更准确");
+  await expect.poll(() => provider.translationRequests().length).toBe(1);
+  const request = provider.translationRequests()[0];
+  expect(request.instructions).toContain("Translate only the selected text");
+  expect(request.prompt).toContain(selectedText);
+  expect(request.prompt).toContain("CONTEXT\n");
+
+  await article.mouse.move(2, 2);
+  await source.evaluate((element) => {
+    const textNode = [...element.childNodes].find((node) => (
+      node.nodeType === Node.TEXT_NODE && node.textContent.trim()
+    ));
+    const firstCharacter = textNode.textContent.search(/\S/);
+    const lastCharacter = Math.min(
+      textNode.length,
+      firstCharacter + Math.floor(textNode.textContent.trim().length * 0.82)
+    );
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode, firstCharacter);
+    range.setEnd(textNode, lastCharacter);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+  });
+  await expect(selectionUi.locator(".trigger")).toBeVisible();
+
+  const popup = await openPopup(extension, tabId);
+  await expect(popup.locator("#translateSelection")).toBeEnabled();
+  await expect(popup.locator("#translateSelection")).toHaveText("Translate selection");
+  await popup.locator("#translateSelection").click();
+  await expect(selectionUi.locator("[data-role='body']")).toHaveText("上下文让翻译更准确");
+  await article.waitForTimeout(350);
+  expect(provider.translationRequests()).toHaveLength(1);
+});
+
+test("a reader configures the page shortcut independently and can turn selection translation off", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  const options = await extension.context.newPage();
+  await options.goto(`chrome-extension://${extension.extensionId}/options.html`);
+  await expect(options.locator("html")).toHaveAttribute("data-transly-options-ready", "true");
+  const selectionTranslationSwitch = options.getByRole("switch", { name: "Selection translation" });
+  await expect(selectionTranslationSwitch).toHaveAttribute("aria-checked", "true");
+  const shortcutStyle = options.locator("#selectionShortcutStyle");
+  await expect(shortcutStyle).toContainText("Small dot");
+  await shortcutStyle.click();
+  await options.locator(".selection-shortcut-option[data-value='icon']").click();
+  await expect(shortcutStyle).toContainText("Icon");
+  await options.reload();
+  await expect(options.locator("html")).toHaveAttribute("data-transly-options-ready", "true");
+  await expect(options.locator("#selectionShortcutStyle")).toContainText("Icon");
+
+  const selectionIconSwitch = options.getByRole("switch", { name: "Selection shortcut" });
+  await expect(selectionIconSwitch).toHaveAttribute("aria-checked", "true");
+
+  const { page: article, tabId } = await openArticle(extension, provider);
+  const source = article.locator("article > p").first();
+  await source.evaluate((element) => {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+  });
+  const selectionTrigger = article.locator("[data-transly-selection-ui] .trigger");
+  await expect(selectionTrigger).toBeVisible();
+  await expect(selectionTrigger).toHaveAttribute("data-style", "icon");
+  await expect(selectionTrigger.locator("img")).toBeVisible();
+  await expect.poll(() => selectionTrigger.evaluate((element) => getComputedStyle(element).boxShadow)).toBe("none");
+
+  await article.mouse.move(2, 2);
+  await selectionIconSwitch.click();
+  await expect(selectionIconSwitch).toHaveAttribute("aria-checked", "false");
+  await expect(selectionTrigger).toBeHidden();
+  await source.evaluate((element) => {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+  });
+  await expect(selectionTrigger).toBeHidden();
+
+  const popup = await openPopup(extension, tabId);
+  await expect(popup.locator("#translateSelection")).toBeEnabled();
+  await popup.locator("#translateSelection").click();
+  const selectionUi = article.locator("[data-transly-selection-ui]");
+  await expect(selectionUi.locator(".panel")).toBeVisible();
+  await expect(selectionUi.locator("[data-role='body']")).toHaveText("上下文让翻译更准确");
+  expect(provider.translationRequests()).toHaveLength(1);
+
+  await selectionTranslationSwitch.click();
+  await expect(selectionTranslationSwitch).toHaveAttribute("aria-checked", "false");
+  await expect(options.locator("#selectionIconEnabled")).toBeDisabled();
+  await expect(options.locator("#selectionShortcutStyle")).toBeDisabled();
+  await expect(selectionUi.locator(".panel")).toBeHidden();
+  await options.reload();
+  await expect(options.locator("html")).toHaveAttribute("data-transly-options-ready", "true");
+  await expect(options.getByRole("switch", { name: "Selection translation" })).toHaveAttribute(
+    "aria-checked",
+    "false"
+  );
+  const disabledPopup = await openPopup(extension, tabId);
+  await expect(disabledPopup.locator("#translateSelection")).toHaveCount(0);
+});
+
+test("a reader stops an article translation without losing completed passages", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  const { page: article, tabId } = await openArticle(extension, provider);
+  const popup = await openPopup(extension, tabId);
+  await popup.locator("#translateArticle").click();
+
+  await expect(article.locator(".transly-translation:not(.transly-loading)").first()).toBeVisible();
+  expect(await article.locator(".transly-loading").count()).toBeGreaterThan(0);
+
+  const stopPopup = await openPopup(extension, tabId);
+  await expect(stopPopup.locator("#translateArticle")).toHaveText("Stop");
+  await expect(stopPopup.locator("#translateArticle")).toBeEnabled();
+  await stopPopup.locator("#translateArticle").click();
+
+  await expect(article.locator(".transly-loading")).toHaveCount(0);
+  const completedCount = await article.locator(".transly-translation:not(.transly-loading)").count();
+  expect(completedCount).toBeGreaterThan(0);
+  expect(completedCount).toBeLessThan(9);
+  await expect(article.locator("html")).toHaveAttribute("data-transly-article-status", "translated");
+  await expect.poll(() => provider.state.abortedTranslations).toBeGreaterThan(0);
+
+  await expect(stopPopup.locator("#translateArticle")).toHaveText("Restore");
+});
+
 test("a reader switches models in the popup and the choice survives a browser restart", async ({
   extension,
   provider

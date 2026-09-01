@@ -1,5 +1,6 @@
 import { Combobox } from "@base-ui/react/combobox";
 import { Select } from "@base-ui/react/select";
+import { Switch } from "@base-ui/react/switch";
 import { Check, ChevronDown, Eye, EyeOff, LoaderCircle, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
@@ -8,6 +9,7 @@ import { interfaceLanguageItems } from "../../src/ui/i18n";
 import { useInterfaceLanguage } from "../../src/ui/use-interface-language";
 
 type Protocol = "auto" | "responses" | "chat-completions";
+type SelectionShortcutStyle = "dot" | "icon";
 type ProviderConfig = { apiUrl: string; apiKey: string; model: string; protocol: Protocol };
 type LocalProvider = {
   apiUrl: string;
@@ -34,7 +36,7 @@ type DiagnosticEvent = {
 };
 
 export function App() {
-  const { language, preference, settingsReady, setUiLanguage, t } = useInterfaceLanguage();
+  const { language, preference, settings, settingsReady, setUiLanguage, t } = useInterfaceLanguage();
   const initialized = useRef(false);
   const debugMode = new URLSearchParams(globalThis.location?.search || "").get("debug") === "1";
   const [apiUrl, setApiUrl] = useState("");
@@ -59,10 +61,17 @@ export function App() {
   const [diagnostics, setDiagnostics] = useState<DiagnosticEvent[]>([]);
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
   const [diagnosticsStatus, setDiagnosticsStatus] = useState("");
+  const [selectionTranslationEnabled, setSelectionTranslationEnabled] = useState(true);
+  const [selectionIconEnabled, setSelectionIconEnabled] = useState(true);
+  const [selectionShortcutStyle, setSelectionShortcutStyle] = useState<SelectionShortcutStyle>("dot");
 
   const selectedModel = manualModel ? customModel.trim() : model.trim();
   const connection = useMemo(() => ({ apiUrl, apiKey, protocol }), [apiKey, apiUrl, protocol]);
   const uiLanguageItems = useMemo(() => interfaceLanguageItems(language), [language]);
+  const selectionShortcutItems = useMemo(() => [
+    { value: "dot" as const, label: t("selectionShortcutDot") },
+    { value: "icon" as const, label: t("selectionShortcutIcon") }
+  ], [t]);
   const protocols = useMemo(() => [
     { value: "auto", label: t("autoDetect") },
     { value: "responses", label: "Responses API" },
@@ -73,6 +82,58 @@ export function App() {
     setStatus(message);
     setStatusTone(tone);
   }, []);
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    setSelectionTranslationEnabled(settings?.selectionTranslationEnabled !== false);
+    setSelectionIconEnabled(settings?.selectionIconEnabled !== false);
+    setSelectionShortcutStyle(settings?.selectionShortcutStyle === "icon" ? "icon" : "dot");
+  }, [
+    settings?.selectionIconEnabled,
+    settings?.selectionShortcutStyle,
+    settings?.selectionTranslationEnabled,
+    settingsReady
+  ]);
+
+  const updateSelectionTranslation = useCallback(async (enabled: boolean) => {
+    const previous = selectionTranslationEnabled;
+    setSelectionTranslationEnabled(enabled);
+    const response = await sendRuntimeMessage({
+      type: "TRANSLY_SAVE_SETTINGS",
+      payload: { selectionTranslationEnabled: enabled }
+    });
+    if (!response.ok) {
+      setSelectionTranslationEnabled(previous);
+      showStatus(response.error || t("settingsSaveFailed"), "error");
+    }
+  }, [selectionTranslationEnabled, showStatus, t]);
+
+  const updateSelectionIcon = useCallback(async (enabled: boolean) => {
+    const previous = selectionIconEnabled;
+    setSelectionIconEnabled(enabled);
+    const response = await sendRuntimeMessage({
+      type: "TRANSLY_SAVE_SETTINGS",
+      payload: { selectionIconEnabled: enabled }
+    });
+    if (!response.ok) {
+      setSelectionIconEnabled(previous);
+      showStatus(response.error || t("settingsSaveFailed"), "error");
+    }
+  }, [selectionIconEnabled, showStatus, t]);
+
+  const updateSelectionShortcutStyle = useCallback(async (value: string | null) => {
+    const next = value === "icon" ? "icon" : "dot";
+    const previous = selectionShortcutStyle;
+    setSelectionShortcutStyle(next);
+    const response = await sendRuntimeMessage({
+      type: "TRANSLY_SAVE_SETTINGS",
+      payload: { selectionShortcutStyle: next }
+    });
+    if (!response.ok) {
+      setSelectionShortcutStyle(previous);
+      showStatus(response.error || t("settingsSaveFailed"), "error");
+    }
+  }, [selectionShortcutStyle, showStatus, t]);
 
   const updateModelChoices = useCallback((values: unknown[], preferred = "") => {
     const nextModels = normalizeModels(values);
@@ -359,33 +420,102 @@ export function App() {
   return (
     <main className="settings-shell">
       <section className="interface-settings" aria-labelledby="interfaceHeading">
-        <div className="section-heading">
-          <h2 id="interfaceHeading">{t("interfaceHeading")}</h2>
-          <p>{t("interfaceDescription")}</p>
+        <div className="interface-setting-row">
+          <div className="section-heading">
+            <h2 id="interfaceHeading">{t("interfaceHeading")}</h2>
+            <p>{t("interfaceDescription")}</p>
+          </div>
+          <Select.Root items={uiLanguageItems} value={preference} onValueChange={async (value) => {
+            showStatus("");
+            await setUiLanguage(value);
+          }}>
+            <Select.Trigger id="settingsUiLanguage" className="interface-language-trigger" aria-label={t("interfaceLanguage")}>
+              <Select.Value />
+              <Select.Icon className="control-icon"><ChevronDown size={17} /></Select.Icon>
+            </Select.Trigger>
+            <Select.Portal>
+              <Select.Positioner className="combobox-positioner" align="end" sideOffset={5}>
+                <Select.Popup className="protocol-popup interface-language-popup">
+                  <Select.List className="protocol-list">
+                    {uiLanguageItems.map((item) => (
+                      <Select.Item className="protocol-option settings-interface-option" data-value={item.value} key={item.value} value={item.value}>
+                        <Select.ItemIndicator><Check size={15} /></Select.ItemIndicator>
+                        <Select.ItemText>{item.label}</Select.ItemText>
+                      </Select.Item>
+                    ))}
+                  </Select.List>
+                </Select.Popup>
+              </Select.Positioner>
+            </Select.Portal>
+          </Select.Root>
         </div>
-        <Select.Root items={uiLanguageItems} value={preference} onValueChange={async (value) => {
-          showStatus("");
-          await setUiLanguage(value);
-        }}>
-          <Select.Trigger id="settingsUiLanguage" className="interface-language-trigger" aria-label={t("interfaceLanguage")}>
-            <Select.Value />
-            <Select.Icon className="control-icon"><ChevronDown size={17} /></Select.Icon>
-          </Select.Trigger>
-          <Select.Portal>
-            <Select.Positioner className="combobox-positioner" align="end" sideOffset={5}>
-              <Select.Popup className="protocol-popup interface-language-popup">
-                <Select.List className="protocol-list">
-                  {uiLanguageItems.map((item) => (
-                    <Select.Item className="protocol-option settings-interface-option" data-value={item.value} key={item.value} value={item.value}>
-                      <Select.ItemIndicator><Check size={15} /></Select.ItemIndicator>
-                      <Select.ItemText>{item.label}</Select.ItemText>
-                    </Select.Item>
-                  ))}
-                </Select.List>
-              </Select.Popup>
-            </Select.Positioner>
-          </Select.Portal>
-        </Select.Root>
+        <div className="interface-setting-row interface-toggle-row">
+          <div className="section-heading">
+            <h2>{t("selectionTranslation")}</h2>
+            <p>{t("selectionTranslationDescription")}</p>
+          </div>
+          <Switch.Root
+            id="selectionTranslationEnabled"
+            className="settings-switch"
+            checked={selectionTranslationEnabled}
+            onCheckedChange={updateSelectionTranslation}
+            aria-label={t("selectionTranslation")}
+          >
+            <Switch.Thumb className="settings-switch-thumb" />
+          </Switch.Root>
+        </div>
+        <div className="interface-setting-row interface-toggle-row">
+          <div className="section-heading">
+            <h2>{t("selectionIcon")}</h2>
+            <p>{t("selectionIconDescription")}</p>
+          </div>
+          <div className="selection-shortcut-controls">
+            <Select.Root
+              items={selectionShortcutItems}
+              value={selectionShortcutStyle}
+              onValueChange={updateSelectionShortcutStyle}
+              disabled={!selectionTranslationEnabled || !selectionIconEnabled}
+            >
+              <Select.Trigger
+                id="selectionShortcutStyle"
+                className="selection-shortcut-trigger"
+                aria-label={t("selectionShortcutAppearance")}
+              >
+                <Select.Value />
+                <Select.Icon className="control-icon"><ChevronDown size={16} /></Select.Icon>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Positioner className="combobox-positioner" align="end" sideOffset={5}>
+                  <Select.Popup className="protocol-popup selection-shortcut-popup">
+                    <Select.List className="protocol-list">
+                      {selectionShortcutItems.map((item) => (
+                        <Select.Item
+                          className="protocol-option selection-shortcut-option"
+                          data-value={item.value}
+                          key={item.value}
+                          value={item.value}
+                        >
+                          <Select.ItemIndicator><Check size={15} /></Select.ItemIndicator>
+                          <Select.ItemText>{item.label}</Select.ItemText>
+                        </Select.Item>
+                      ))}
+                    </Select.List>
+                  </Select.Popup>
+                </Select.Positioner>
+              </Select.Portal>
+            </Select.Root>
+            <Switch.Root
+              id="selectionIconEnabled"
+              className="settings-switch"
+              checked={selectionIconEnabled}
+              onCheckedChange={updateSelectionIcon}
+              disabled={!selectionTranslationEnabled}
+              aria-label={t("selectionIcon")}
+            >
+              <Switch.Thumb className="settings-switch-thumb" />
+            </Switch.Root>
+          </div>
+        </div>
       </section>
 
       <section className="quick-setup" aria-labelledby="quickSetupHeading">

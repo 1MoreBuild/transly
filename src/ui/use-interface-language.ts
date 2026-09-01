@@ -11,6 +11,9 @@ import { sendRuntimeMessage } from "./extension-api";
 type StoredSettings = {
   uiLanguage?: UiLanguagePreference;
   targetLanguage?: string;
+  selectionTranslationEnabled?: boolean;
+  selectionIconEnabled?: boolean;
+  selectionShortcutStyle?: "dot" | "icon";
   articleDisplayMode?: string;
 };
 

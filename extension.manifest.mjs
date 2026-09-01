@@ -16,7 +16,7 @@ export const extensionManifest = /** @type {const} */ ({
     48: "assets/icons/icon48.png",
     128: "assets/icons/icon128.png"
   },
-  permissions: ["activeTab", "nativeMessaging", "scripting", "storage"],
+  permissions: ["activeTab", "contextMenus", "nativeMessaging", "scripting", "storage"],
   host_permissions: ["<all_urls>"],
   action: {
     default_title: "Transly",
@@ -43,6 +43,7 @@ export const extensionManifest = /** @type {const} */ ({
         "src/content/article-batching.js",
         "src/content/article-placement.js",
         "src/content/article-spacing.js",
+        "src/content/selection.js",
         "src/content/article.js"
       ],
       css: ["src/content/styles.css"],
@@ -62,6 +63,10 @@ export const extensionManifest = /** @type {const} */ ({
     {
       matches: YOUTUBE_MATCHES,
       resources: ["src/injected/subtitle-hook.js", "assets/icons/transly-player.svg"]
+    },
+    {
+      matches: ["<all_urls>"],
+      resources: ["assets/icons/transly-player.svg"]
     }
   ]
 });

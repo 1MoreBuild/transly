@@ -169,6 +169,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "TRANSLY_CANCEL_ARTICLE") {
+    const clientRequestId = activeArticleClientRunId;
+    activeArticleClientRunId = "";
+    const articleTranslated = cancelArticleTranslation();
+    setArticleRuntimeState(articleTranslated ? "translated" : "idle");
+    if (!clientRequestId) {
+      sendResponse({ ok: true, data: { cancelled: false, articleTranslated } });
+      return false;
+    }
+    requestTranslationCancellation(clientRequestId)
+      .then((data) => sendResponse({ ok: true, data: { ...data, articleTranslated } }))
+      .catch(() => sendResponse({
+        ok: true,
+        data: { cancelled: false, articleTranslated }
+      }));
+    return true;
+  }
+
   if (message?.type === "TRANSLY_CLEAR_ARTICLE") {
     activeArticleClientRunId = "";
     clearArticleTranslations();
@@ -1310,6 +1328,34 @@ function clearArticleTranslations(options = {}) {
   });
 }
 
+function cancelArticleTranslation() {
+  articleRunId++;
+  activeArticleProgressBatches.clear();
+  let articleTranslated = false;
+
+  document.querySelectorAll("[data-transly-article-id]").forEach((source) => {
+    const translation = getTranslationNode(source);
+    const completed = translation && !translation.classList.contains("transly-loading");
+    source.classList.remove("transly-working", "transly-error", "transly-source-revealed");
+    if (completed) {
+      articleTranslated = true;
+      source.dataset.translyTranslated = "true";
+      updateTranslationRevealState(translation, source);
+      return;
+    }
+
+    translation?.remove();
+    globalThis.TranslyArticlePlacement?.restoreSourceParts(source);
+    restoreTranslationSpacing(source);
+    delete source.dataset.translyArticleId;
+    delete source.dataset.translyTranslated;
+    if (source.dataset.translyNavigationTextHost === "true") source.replaceWith(...source.childNodes);
+  });
+
+  document.querySelectorAll(".transly-translation.transly-loading").forEach((node) => node.remove());
+  return articleTranslated;
+}
+
 function extractRichText(element) {
   const placeholders = [];
 
@@ -1409,6 +1455,18 @@ function requestArticleAudit(payload) {
     chrome.runtime.sendMessage({ type: "TRANSLY_AUDIT_ARTICLE", payload }, (response) => {
       if (response?.ok) resolve(response.data);
       else reject(new Error(response?.error || "Article audit failed"));
+    });
+  });
+}
+
+function requestTranslationCancellation(clientRequestId) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({
+      type: "TRANSLY_CANCEL_TRANSLATION",
+      payload: { clientRequestId }
+    }, (response) => {
+      if (response?.ok) resolve(response.data || {});
+      else reject(new Error(response?.error || "Could not stop translation"));
     });
   });
 }

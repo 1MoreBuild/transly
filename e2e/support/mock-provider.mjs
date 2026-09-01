@@ -90,6 +90,7 @@ export async function startMockProvider() {
     failNextTranslation: false,
     failTranslationNumber: 0,
     streamDelayMs: 260,
+    abortedTranslations: 0,
     requests: []
   };
 
@@ -218,6 +219,11 @@ export async function startMockProvider() {
       const output = kind === "audit"
         ? JSON.stringify({ actions: [], notes: [] })
         : JSON.stringify(extractPassages(prompt).map(translatePassage));
+      let finished = false;
+      response.once("finish", () => { finished = true; });
+      response.once("close", () => {
+        if (!finished && kind === "translation") state.abortedTranslations++;
+      });
       await streamResponse(response, output, kind === "translation" ? state.streamDelayMs : 0);
       return;
     }
@@ -278,12 +284,14 @@ async function streamResponse(response, output, delayMs) {
 
   const chunks = splitJsonOutput(output);
   for (const chunk of chunks) {
+    if (response.destroyed) return;
     response.write(`data: ${JSON.stringify({
       type: "response.output_text.delta",
       delta: chunk
     })}\n\n`);
     if (delayMs) await delay(delayMs);
   }
+  if (response.destroyed) return;
   response.write("data: [DONE]\n\n");
   response.end();
 }

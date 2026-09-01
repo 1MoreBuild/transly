@@ -1,0 +1,1 @@
+- Translate selected text from the popup, Chrome's right-click menu, or a configurable dot or icon that follows the selection endpoint and opens the translation on hover, with independent controls for the feature and its page shortcut.

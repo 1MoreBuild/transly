@@ -22,7 +22,11 @@ export function createTranslationService(options = {}) {
     const cacheIdentity = payload.cacheKey
       ? await buildCacheIdentity("translation", context.config, payload.cacheKey, request)
       : null;
-    return resolveCached(cacheIdentity, () => translateUncached(payload, request, context, 1));
+    return resolveCached(
+      cacheIdentity,
+      () => translateUncached(payload, request, context, 1),
+      { shareInFlight: !context.signal }
+    );
   }
 
   async function translateUncached(payload, preparedRequest, context, attempt) {
@@ -90,13 +94,14 @@ export function createTranslationService(options = {}) {
     return resolveCached(cacheIdentity, async () => {
       const response = await queue.run(() => modelRequest(context.config, request, { signal: context.signal }));
       return normalizeAuditResult(parseJsonOutput(response.outputText), payload);
-    });
+    }, { shareInFlight: !context.signal });
   }
 
-  async function resolveCached(cacheIdentity, produce) {
+  async function resolveCached(cacheIdentity, produce, options = {}) {
     if (!cacheIdentity) return produce();
     if (hotResponses.has(cacheIdentity)) return hotResponses.get(cacheIdentity);
-    if (inFlightResponses.has(cacheIdentity)) return inFlightResponses.get(cacheIdentity);
+    const shareInFlight = options.shareInFlight !== false;
+    if (shareInFlight && inFlightResponses.has(cacheIdentity)) return inFlightResponses.get(cacheIdentity);
 
     const operation = (async () => {
       const cached = await responseCache.get(cacheIdentity).catch(() => ({ hit: false }));
@@ -109,11 +114,11 @@ export function createTranslationService(options = {}) {
       await responseCache.set(cacheIdentity, value).catch(() => false);
       return value;
     })();
-    inFlightResponses.set(cacheIdentity, operation);
+    if (shareInFlight) inFlightResponses.set(cacheIdentity, operation);
     try {
       return await operation;
     } finally {
-      if (inFlightResponses.get(cacheIdentity) === operation) inFlightResponses.delete(cacheIdentity);
+      if (shareInFlight && inFlightResponses.get(cacheIdentity) === operation) inFlightResponses.delete(cacheIdentity);
     }
   }
 
@@ -145,7 +150,7 @@ function validateTranslationPayload(payload) {
   if (!Array.isArray(payload.items) || !payload.items.length || payload.items.length > 250) {
     throw requestError("Translation request must contain 1 to 250 items.");
   }
-  if (!["article", "subtitle"].includes(payload.mode)) throw requestError("Unsupported translation mode.");
+  if (!["article", "selection", "subtitle"].includes(payload.mode)) throw requestError("Unsupported translation mode.");
   if (typeof payload.targetLanguage !== "string" || !payload.targetLanguage || payload.targetLanguage.length > 40) {
     throw requestError("Invalid target language.");
   }

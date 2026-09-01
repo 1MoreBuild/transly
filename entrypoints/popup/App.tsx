@@ -1,5 +1,5 @@
 import { Select } from "@base-ui/react/select";
-import { ArrowLeftRight, Check, ChevronDown, LoaderCircle, Settings2 } from "lucide-react";
+import { ArrowLeftRight, Check, ChevronDown, LoaderCircle, Settings2, Square, TextCursorInput } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   filterTranslationModels,
@@ -37,9 +37,11 @@ export function App() {
   const [articleStatus, setArticleStatus] = useState<ArticleStatus>("idle");
   const [articleError, setArticleError] = useState("");
   const [hasTranslation, setHasTranslation] = useState(false);
+  const [selectionAvailable, setSelectionAvailable] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
 
   const providerConfigured = Boolean(provider.configured);
+  const selectionTranslationEnabled = settings?.selectionTranslationEnabled !== false;
   const providerAvailable = provider.available !== false;
   const providerState = !providerChecked
     ? t("checking")
@@ -53,7 +55,7 @@ export function App() {
     if (!settingsReady || initialized.current) return;
     initialized.current = true;
     let active = true;
-    loadPageState().then(async (pageState) => {
+    Promise.all([loadPageState(), loadSelectionState()]).then(async ([pageState, selectionState]) => {
       if (!active) return;
       setTargetLanguage(settings?.targetLanguage || "zh-CN");
       setDisplayMode(settings?.articleDisplayMode || "bilingual");
@@ -64,6 +66,7 @@ export function App() {
         setArticleError(String(data.articleError || ""));
         setHasTranslation(Boolean(data.articleTranslated));
       }
+      setSelectionAvailable(Boolean(selectionState?.ok && selectionState.data?.available));
       const response = await sendRuntimeMessage<ProviderSummary>({ type: "TRANSLY_PROVIDER_STATUS" });
       if (!active) return;
       if (response.ok && response.data?.configured) {
@@ -142,6 +145,19 @@ export function App() {
 
   async function runPrimaryAction() {
     setStatusMessage("");
+    if (articleStatus === "running") {
+      try {
+        const response = await sendToActiveTab({ type: "TRANSLY_CANCEL_ARTICLE" }, sourceTabId);
+        if (response?.ok === false) throw new Error(response.error || t("translationFailed"));
+        const articleTranslated = Boolean(response?.data?.articleTranslated);
+        setHasTranslation(articleTranslated);
+        setArticleStatus(articleTranslated ? "translated" : "idle");
+      } catch (error) {
+        setStatusMessage(String((error as Error)?.message || error));
+      }
+      return;
+    }
+
     if (hasTranslation) {
       setArticleStatus("running");
       try {
@@ -172,16 +188,30 @@ export function App() {
     }
   }
 
+  async function translateSelection() {
+    setStatusMessage("");
+    try {
+      const response = await sendToActiveTab({
+        type: "TRANSLY_TRANSLATE_SELECTION",
+        targetLanguage
+      }, sourceTabId);
+      if (response?.ok === false) throw new Error(response.error || t("selectionTranslationFailed"));
+      window.close();
+    } catch (error) {
+      setStatusMessage(String((error as Error)?.message || error));
+    }
+  }
+
   const modelItems = useMemo(() => {
     const values = models.length ? models : model ? [model] : [];
     return values.map((value) => ({ value, label: splitModelName(value).name }));
   }, [model, models]);
   const running = articleStatus === "running";
   const primaryLabel = running
-    ? t("translating")
+    ? t("stop")
     : hasTranslation ? t("restore") : t("translate");
   const primaryAriaLabel = running
-    ? t("translationInProgress")
+    ? t("stopArticleTranslation")
     : hasTranslation ? t("restoreOriginalArticle") : t("translateArticle");
   const providerIcon = provider.provider?.icon
     ? chrome.runtime.getURL(provider.provider.icon)
@@ -357,15 +387,29 @@ export function App() {
             id="translateArticle"
             className="primary-action"
             type="button"
-            disabled={running || (!hasTranslation && !providerConfigured)}
-            aria-busy={running}
+            data-action={running ? "stop" : hasTranslation ? "restore" : "translate"}
+            disabled={!running && !hasTranslation && !providerConfigured}
             aria-label={primaryAriaLabel}
             onClick={runPrimaryAction}
           >
-            {running && <LoaderCircle className="spin" size={17} />}
+            {running && <Square size={12} fill="currentColor" />}
             <span>{primaryLabel}</span>
           </button>
         </div>
+        {selectionTranslationEnabled && (
+          <button
+            id="translateSelection"
+            className="selection-action"
+            type="button"
+            disabled={!selectionAvailable || !providerConfigured}
+            aria-label={selectionAvailable ? t("translateSelection") : t("selectTextFirst")}
+            title={selectionAvailable ? t("translateSelection") : t("selectTextFirst")}
+            onClick={translateSelection}
+          >
+            <TextCursorInput size={15} aria-hidden="true" />
+            <span>{selectionAvailable ? t("translateSelection") : t("selectTextFirst")}</span>
+          </button>
+        )}
         <p id="status" className="inline-status" role="status" aria-live="polite" hidden={!statusMessage}>
           {statusMessage}
         </p>
@@ -378,6 +422,14 @@ async function loadPageState() {
   try {
     const target = await resolveActiveArticleTarget(sourceTabId);
     return await sendToTabFrame(target, { type: "TRANSLY_GET_PAGE_STATE" });
+  } catch {
+    return { ok: false };
+  }
+}
+
+async function loadSelectionState() {
+  try {
+    return await sendToActiveTab({ type: "TRANSLY_GET_SELECTION_STATE" }, sourceTabId);
   } catch {
     return { ok: false };
   }

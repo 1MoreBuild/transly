@@ -13,6 +13,9 @@ import { createTranslationService } from "./provider/translation-service.js";
 const DEFAULT_SETTINGS = Object.freeze({
   uiLanguage: "auto",
   targetLanguage: "zh-CN",
+  selectionTranslationEnabled: true,
+  selectionIconEnabled: true,
+  selectionShortcutStyle: "dot",
   articleDisplayMode: "bilingual",
   articleBatchChars: 28000,
   articleBatchMaxItems: 28,
@@ -31,6 +34,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   subtitleBatchMaxItems: 12
 });
 const PROVIDER_STATUS_TIMEOUT_MS = 3_000;
+const SELECTION_CONTEXT_MENU_ID = "transly-translate-selection";
 
 export function registerBackground(chromeApi, dependencies = {}) {
   const service = dependencies.service || createTranslationService();
@@ -38,14 +42,33 @@ export function registerBackground(chromeApi, dependencies = {}) {
   const listModels = dependencies.listProviderModels || listProviderModels;
   const discoverProviders = dependencies.discoverLocalProviders || discoverLocalProviders;
   const connectLaneProvider = dependencies.connectLane || (() => connectLane(chromeApi));
+  const activeTranslationRuns = new Map();
   let diagnosticWrite = Promise.resolve();
+
+  registerSelectionContextMenu(chromeApi);
 
   Promise.resolve(chromeApi.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" })).catch(() => {
     // Chrome 105+ supports this. Request handling still validates every caller.
   });
 
   chromeApi.runtime.onInstalled?.addListener((details) => {
+    registerSelectionContextMenu(chromeApi);
     if (details.reason === "install") chromeApi.runtime.openOptionsPage();
+  });
+
+  chromeApi.contextMenus?.onClicked.addListener((info, tab) => {
+    if (info.menuItemId !== SELECTION_CONTEXT_MENU_ID || !Number.isInteger(tab?.id)) return;
+    const message = {
+      type: "TRANSLY_TRANSLATE_SELECTION",
+      selectionText: String(info.selectionText || ""),
+      source: "context-menu"
+    };
+    const callback = () => void chromeApi.runtime.lastError;
+    if (Number.isInteger(info.frameId)) {
+      chromeApi.tabs.sendMessage(tab.id, message, { frameId: info.frameId }, callback);
+    } else {
+      chromeApi.tabs.sendMessage(tab.id, message, callback);
+    }
   });
 
   chromeApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -173,22 +196,39 @@ export function registerBackground(chromeApi, dependencies = {}) {
     }
 
     if (message?.type === "TRANSLY_TRANSLATE") {
+      const operation = message.payload?.mode === "article"
+        ? trackTranslationOperation(activeTranslationRuns, sender, message.payload)
+        : idleTranslationOperation();
       withProviderConfig(chromeApi, (config) => service.translate(message.payload, {
         config,
+        signal: operation.signal,
         onProgress(data) {
           relayTranslationProgress(chromeApi, sender, data);
         }
       }))
         .then((data) => sendResponse({ ok: true, data }))
-        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }))
+        .finally(operation.release);
       return true;
     }
 
     if (message?.type === "TRANSLY_AUDIT_ARTICLE") {
-      withProviderConfig(chromeApi, (config) => service.audit(message.payload, { config }))
+      const operation = trackTranslationOperation(activeTranslationRuns, sender, message.payload);
+      withProviderConfig(chromeApi, (config) => service.audit(message.payload, {
+        config,
+        signal: operation.signal
+      }))
         .then((data) => sendResponse({ ok: true, data }))
-        .catch((error) => sendResponse({ ok: false, error: formatError(error) }));
+        .catch((error) => sendResponse({ ok: false, error: formatError(error) }))
+        .finally(operation.release);
       return true;
+    }
+
+    if (message?.type === "TRANSLY_CANCEL_TRANSLATION") {
+      const clientRequestId = String(message.payload?.clientRequestId || "").trim();
+      const cancelled = cancelTranslationOperation(activeTranslationRuns, sender, clientRequestId);
+      sendResponse({ ok: true, data: { cancelled } });
+      return false;
     }
 
     if (message?.type === "TRANSLY_GET_SETTINGS") {
@@ -216,6 +256,10 @@ export function registerBackground(chromeApi, dependencies = {}) {
     if (message?.type === "TRANSLY_SAVE_SETTINGS") {
       chromeApi.storage.sync.set(message.payload || {}, () => {
         const error = chromeApi.runtime.lastError;
+        if (!error && (
+          Object.hasOwn(message.payload || {}, "uiLanguage")
+          || Object.hasOwn(message.payload || {}, "selectionTranslationEnabled")
+        )) registerSelectionContextMenu(chromeApi);
         sendResponse(error ? { ok: false, error: error.message } : { ok: true });
       });
       return true;
@@ -249,6 +293,36 @@ export function registerBackground(chromeApi, dependencies = {}) {
     }
 
     return false;
+  });
+}
+
+function registerSelectionContextMenu(chromeApi) {
+  if (!chromeApi.contextMenus?.removeAll || !chromeApi.contextMenus?.create) return;
+  resolveContextMenuConfig(chromeApi).then(({ enabled, title }) => {
+    chromeApi.contextMenus.removeAll(() => {
+      void chromeApi.runtime.lastError;
+      if (!enabled) return;
+      chromeApi.contextMenus.create({
+        id: SELECTION_CONTEXT_MENU_ID,
+        title,
+        contexts: ["selection"]
+      }, () => void chromeApi.runtime.lastError);
+    });
+  }).catch(() => {});
+}
+
+function resolveContextMenuConfig(chromeApi) {
+  return new Promise((resolve) => {
+    chromeApi.storage.sync.get(["uiLanguage", "selectionTranslationEnabled"], (stored) => {
+      const preference = stored?.uiLanguage;
+      const browserLanguage = chromeApi.i18n?.getUILanguage?.() || "en";
+      const chinese = preference === "zh-CN"
+        || (preference !== "en" && browserLanguage.toLowerCase().startsWith("zh"));
+      resolve({
+        enabled: stored?.selectionTranslationEnabled !== false,
+        title: chinese ? "使用 Transly 翻译所选文本" : "Translate selection with Transly"
+      });
+    });
   });
 }
 
@@ -313,6 +387,7 @@ function sanitizeDiagnostic(payload = {}, sender = {}) {
 
 export function normalizeSettings(storedSettings = {}) {
   const settings = { ...DEFAULT_SETTINGS, ...storedSettings };
+  settings.selectionShortcutStyle = storedSettings.selectionShortcutStyle === "icon" ? "icon" : "dot";
   if (storedSettings.subtitleSourceFontSizePx === undefined && storedSettings.subtitleSourceFontScale !== undefined) {
     settings.subtitleSourceFontSizePx = legacySubtitleFontSize(storedSettings.subtitleSourceFontScale);
   }
@@ -346,6 +421,44 @@ function relayTranslationProgress(chromeApi, sender, data) {
   } else {
     chromeApi.tabs.sendMessage(tabId, message, callback);
   }
+}
+
+function trackTranslationOperation(activeRuns, sender, payload = {}) {
+  const clientRequestId = String(payload.clientRequestId || "").trim();
+  if (!clientRequestId) return { signal: undefined, release() {} };
+  const key = translationRunKey(sender, clientRequestId);
+  let run = activeRuns.get(key);
+  if (!run) {
+    run = { controller: new AbortController(), pending: 0 };
+    activeRuns.set(key, run);
+  }
+  run.pending++;
+  let released = false;
+  return {
+    signal: run.controller.signal,
+    release() {
+      if (released) return;
+      released = true;
+      run.pending--;
+      if (run.pending <= 0 && activeRuns.get(key) === run) activeRuns.delete(key);
+    }
+  };
+}
+
+function idleTranslationOperation() {
+  return { signal: undefined, release() {} };
+}
+
+function cancelTranslationOperation(activeRuns, sender, clientRequestId) {
+  if (!clientRequestId) return false;
+  const run = activeRuns.get(translationRunKey(sender, clientRequestId));
+  if (!run) return false;
+  run.controller.abort(new Error("Translation stopped."));
+  return true;
+}
+
+function translationRunKey(sender, clientRequestId) {
+  return `${sender.tab?.id ?? "extension"}:${sender.frameId ?? 0}:${clientRequestId}`;
 }
 
 function isOptionsPage(chromeApi, sender) {

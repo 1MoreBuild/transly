@@ -20,10 +20,23 @@ button, input { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 .settings-shell { width: min(760px, calc(100% - 40px)); margin: 0 auto; padding: 32px 0 72px; }
 
-.interface-settings { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.interface-settings { display: grid; gap: 18px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.interface-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.interface-toggle-row { padding-top: 18px; border-top: 1px solid var(--line); }
 .interface-language-trigger { display: flex; width: 220px; min-height: 44px; flex: none; align-items: center; justify-content: space-between; gap: 12px; padding: 0 13px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); cursor: pointer; font-weight: 650; }
 .interface-language-trigger:focus-visible { border-color: var(--ink); outline: 2px solid rgb(255 196 26 / 35%); outline-offset: 1px; }
 .interface-language-popup { width: var(--anchor-width); min-width: 220px; }
+.selection-shortcut-controls { display: flex; flex: none; align-items: center; gap: 10px; }
+.selection-shortcut-trigger { display: flex; width: 144px; min-height: 40px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); cursor: pointer; font-size: 13px; font-weight: 650; }
+.selection-shortcut-trigger:disabled { cursor: not-allowed; opacity: .48; }
+.selection-shortcut-trigger:focus-visible { border-color: var(--ink); outline: 2px solid rgb(255 196 26 / 35%); outline-offset: 1px; }
+.selection-shortcut-popup { width: var(--anchor-width); min-width: 144px; }
+.settings-switch { position: relative; width: 38px; height: 22px; flex: none; padding: 0; border: 0; border-radius: 999px; background: #c9c8c3; cursor: pointer; transition: background-color 140ms ease; }
+.settings-switch[data-checked] { background: var(--ink); }
+.settings-switch:disabled { cursor: not-allowed; opacity: .42; }
+.settings-switch:focus-visible { outline: 2px solid rgb(255 196 26 / 55%); outline-offset: 2px; }
+.settings-switch-thumb { display: block; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 22%); transform: translateX(2px); transition: transform 140ms ease; }
+.settings-switch[data-checked] .settings-switch-thumb { transform: translateX(18px); }
 .quick-setup { padding: 24px 0; border-bottom: 1px solid var(--line); }
 .section-heading h2, .section-heading p { margin: 0; }
 .section-heading h2 { font-size: 18px; }
@@ -136,7 +149,10 @@ button { -webkit-tap-highlight-color: transparent; }
 
 @media (max-width: 600px) {
   .settings-shell { width: min(100% - 28px, 760px); padding-top: 22px; }
-  .interface-settings { align-items: stretch; flex-direction: column; gap: 14px; }
+  .interface-settings { gap: 14px; }
+  .interface-setting-row { align-items: stretch; flex-direction: column; gap: 12px; }
+  .interface-toggle-row { align-items: center; flex-direction: row; }
+  .selection-shortcut-controls { align-items: flex-end; flex-direction: column-reverse; }
   .interface-language-trigger { width: 100%; }
   .quick-actions, .model-input-row { grid-template-columns: 1fr; }
   .form-footer { align-items: stretch; flex-direction: column; }

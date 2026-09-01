@@ -236,7 +236,8 @@ function createTimeoutController(externalSignal, timeoutMs) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(new Error("Translation request timed out.")), timeoutMs);
   const abort = () => controller.abort(externalSignal.reason);
-  externalSignal?.addEventListener("abort", abort, { once: true });
+  if (externalSignal?.aborted) abort();
+  else externalSignal?.addEventListener("abort", abort, { once: true });
   return {
     signal: controller.signal,
     cleanup() {
