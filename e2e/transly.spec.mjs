@@ -523,6 +523,57 @@ test("a reader configures a provider, translates progressively, changes reading 
   expect(provider.translationRequests()[0].prompt).not.toContain("https://example.com/reference-icon");
 });
 
+test("Twitter post translations preserve paragraphs and plain-text lists", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  const { page: article, tabId } = await openArticle(extension, { articleUrl: provider.twitterUrl });
+  const source = article.locator("#twitter-post");
+  const originalText = await source.innerText();
+  await expect(source).toHaveCSS("white-space", "pre-wrap");
+  await expect(source.locator("br")).toHaveCount(0);
+  expect(originalText).toContain("orchestration.\n\n\nOur plan is:");
+  expect(originalText).toContain("ordinary HTML spacing");
+
+  const popup = await openPopup(extension, tabId);
+  await popup.locator("#translateArticle").click();
+  await expect(article.locator("html")).toHaveAttribute("data-transly-article-status", "translated");
+
+  const sourceId = await source.getAttribute("data-transly-article-id");
+  const translation = article.locator(`.transly-translation[data-transly-for='${sourceId}']`);
+  await expect(translation).toBeVisible();
+  if (process.env.TRANSLY_TWITTER_CAPTURE) {
+    await article.screenshot({ path: process.env.TRANSLY_TWITTER_CAPTURE, fullPage: true, animations: "disabled" });
+  }
+  expect(await translation.innerText()).toBe([
+    "我们对智能体编排有不同的看法。",
+    "",
+    "",
+    "我们的计划是：",
+    "- 与持久化沙箱提供商深度集成。",
+    "- 在分布式计算环境中运行确定性工具。",
+    "- 保持编排层开放。",
+    "",
+    "我们一年前开始构建它。关注 @hatchet_dev",
+    "",
+    "本段中的普通 HTML 空白仍然合并为空格。"
+  ].join("\n"));
+  await expect(translation.locator("a[href='https://x.com/hatchet_dev']")).toHaveText("@hatchet_dev");
+  expect(await source.innerText()).toBe(originalText);
+
+  const translationInput = provider.translationRequests()
+    .map(({ prompt }) => prompt.split("TEXT TO TRANSLATE\n").at(-1))
+    .join("\n");
+  expect(translationInput).toMatch(/orchestration\.\s*(\[\[TRANSLY_PH_\d+]]\s*){3}Our plan is:/);
+  expect(translationInput).toMatch(/Our plan is:\s*\[\[TRANSLY_PH_\d+]]\s*- Integrate/);
+  expect(translationInput).toContain("ordinary HTML spacing");
+  expect(translationInput).toContain("Normal HTML indentation stays within one paragraph.");
+  const collapsedSourceId = await article.locator("#collapsed-whitespace").getAttribute("data-transly-article-id");
+  const collapsedTranslation = article.locator(`.transly-translation[data-transly-for='${collapsedSourceId}']`);
+  expect(await collapsedTranslation.innerText()).toBe("普通 HTML 缩进仍然保持在同一段中。");
+});
+
 test("a reader hovers the selection dot and reuses its cached translation from the popup", async ({
   extension,
   provider

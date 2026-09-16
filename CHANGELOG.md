@@ -7,6 +7,21 @@ and Transly uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-16
+
+### Added
+
+- Translate selected text from the popup, Chrome's right-click menu, or a configurable dot or icon that follows the selection endpoint and opens the translation on hover, with independent controls for the feature and its page shortcut.
+- Stop an article translation in progress while keeping passages that already finished.
+
+### Changed
+
+- Add a little more space between the original text and its translation for easier bilingual reading.
+
+### Fixed
+
+- Preserve paragraph spacing and list line breaks when translating Twitter/X posts and other text that uses visible newlines.
+
 ## [0.2.1] - 2026-08-11
 
 ### Added
@@ -63,7 +78,8 @@ and Transly uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Refined the popup, provider setup, translated-page styling, and installation
   documentation for the first public release.
 
-[Unreleased]: https://github.com/1MoreBuild/transly/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/1MoreBuild/transly/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/1MoreBuild/transly/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/1MoreBuild/transly/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/1MoreBuild/transly/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/1MoreBuild/transly/releases/tag/v0.1.1

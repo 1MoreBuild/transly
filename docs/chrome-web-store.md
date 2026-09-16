@@ -37,6 +37,8 @@ Key features:
 
 - Translate complete web articles with document-level context.
 - Read the original and translation together, or switch to translation only.
+- Translate selected text from the popup, right-click menu, or a page shortcut.
+- Stop translation while keeping passages that have already finished.
 - Preserve links, lists, tables, code, formulas, and the source page's layout.
 - Show completed translated passages as model batches return.
 - Cache validated translations locally to avoid repeated requests.
@@ -67,6 +69,11 @@ page.
 
 > Checks the active page and its frames for Transly's article content script so
 > commands are sent to the frame that contains the article.
+
+`contextMenus`
+
+> Adds a Transly command to Chrome's right-click menu for translating text that
+> the user has selected. Translation starts only when the user chooses it.
 
 `storage`
 

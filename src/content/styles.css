@@ -3,7 +3,7 @@
     "Segoe UI", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", Arial, sans-serif;
   display: block;
-  margin-top: 0.34em;
+  margin-top: clamp(8px, 0.4em, 12px);
   margin-bottom: 0;
   color: inherit;
   opacity: 1;

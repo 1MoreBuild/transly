@@ -88,7 +88,8 @@ function buildArticleInstructions(targetLanguage, passageBreak) {
     "Keep proper nouns, product and model names, code identifiers, URLs, placeholder tokens such as [[TRANSLY_PH_0]], and technical terms without an established translation unchanged.",
     "For technical writing, use terminology practitioners actually use. Keep an English technical term when translating it would be ambiguous, less precise, or unnatural; do not translate every English term by force.",
     languageGuidance,
-    "Translate headings as concise headings and prose as fluent prose.",
+    "Translate headings as concise headings and prose as fluent prose. Preserve paragraph breaks and list structure within each passage.",
+    "Structural placeholders such as [[TRANSLY_PH_0]] represent line breaks, links, or protected content. Keep every token exactly once at the corresponding position in the translated text; keep line-break boundaries and link pairs intact, and never collect tokens at the end.",
     `Before returning, silently edit every passage as a native ${targetLanguage} editor: remove awkward literal phrasing and source-language syntax while preserving every fact, distinction, and tone. Return only the edited final translation.`,
     `Return only a valid JSON array of translated strings in input order, with exactly one string for each passage separated by ${passageBreak} in the input.`
   ].filter(Boolean).join("\n");

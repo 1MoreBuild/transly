@@ -17,7 +17,7 @@
     source.dataset[DATA_PIXELS] = String(sourceMarginBottom);
     source.style.setProperty("margin-bottom", "0px", "important");
 
-    const withinGroupGap = roundPixels(Math.min(10, Math.max(5, sourceFontSize * 0.24)));
+    const withinGroupGap = roundPixels(Math.min(12, Math.max(8, sourceFontSize * 0.4)));
     const afterGroupGap = sourceMarginBottom
       || roundPixels(Math.min(20, Math.max(10, sourceFontSize * 0.62)));
     translation.style.marginTop = `${withinGroupGap}px`;

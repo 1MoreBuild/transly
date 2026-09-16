@@ -1224,7 +1224,7 @@ function attachTranslationPresentation(source, node) {
 
   const placement = globalThis.TranslyArticlePlacement;
   if (placement?.isTableCell(source) || placement?.isGridItem(source)) {
-    const embeddedGap = Math.min(10, Math.max(5, sourceFontSize * 0.24));
+    const embeddedGap = Math.min(12, Math.max(8, sourceFontSize * 0.4));
     node.style.marginTop = `${embeddedGap}px`;
     node.style.marginBottom = "0px";
     return;
@@ -1235,7 +1235,7 @@ function attachTranslationPresentation(source, node) {
     return;
   }
 
-  const fallbackGap = Math.min(10, Math.max(5, sourceFontSize * 0.24));
+  const fallbackGap = Math.min(12, Math.max(8, sourceFontSize * 0.4));
   node.style.marginTop = `${fallbackGap}px`;
   node.style.marginBottom = `${sourceMarginBottom || fallbackGap * 2}px`;
 }
@@ -1365,17 +1365,30 @@ function extractRichText(element) {
     return ` ${token} `;
   };
 
+  const addLineBreakPlaceholder = () => {
+    const token = `${ARTICLE_PLACEHOLDER_PREFIX}${placeholders.length}]]`;
+    placeholders.push({ type: "lineBreak", value: "\n" });
+    return ` ${token} `;
+  };
+
   const serializeNode = (node) => {
-    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.nodeValue || "";
+      if (!/[\r\n]/.test(text)) return text;
+      const style = getComputedStyle(node.parentElement);
+      const preservesLineBreaks = ["preserve", "preserve-breaks", "break-spaces"].includes(style.whiteSpaceCollapse)
+        || /^(pre|pre-wrap|pre-line|break-spaces)$/.test(style.whiteSpace);
+      // Protect visible text breaks before compacting HTML whitespace. A normal
+      // paragraph's source-code indentation must not become translated newlines.
+      return preservesLineBreaks
+        ? text.replace(/\r\n|[\r\n]/g, addLineBreakPlaceholder)
+        : text;
+    }
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
     if (isVisualOnlyInlineSubtree(node)) return addNodePlaceholder(node);
 
-    if (safeMatches(node, "br")) {
-      const token = `${ARTICLE_PLACEHOLDER_PREFIX}${placeholders.length}]]`;
-      placeholders.push({ type: "lineBreak", value: "\n" });
-      return ` ${token} `;
-    }
+    if (safeMatches(node, "br")) return addLineBreakPlaceholder();
 
     if (safeMatches(node, "a[href]")) {
       const linkText = compactText(node.innerText || node.textContent);

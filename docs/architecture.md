@@ -25,7 +25,7 @@ flowchart LR
 
 ## Ownership
 
-The content scripts discover readable blocks, protect page structure with placeholders, order work by viewport priority, and render validated translations.
+The content scripts discover readable blocks, protect page structure with placeholders, order work by viewport priority, and render validated translations. Protected structure includes both HTML line breaks and text newlines that the page's CSS preserves, such as paragraph and list breaks in Twitter/X posts. Whitespace collapsed by the page remains collapsed in the translation.
 
 The service worker owns provider configuration, prompt construction, model request concurrency, streaming JSON parsing, response validation, placeholder repair, the article coverage audit, and the response cache.
 
