@@ -589,30 +589,39 @@ test("a reader hovers the selection dot and reuses its cached translation from t
       node.nodeType === Node.TEXT_NODE && node.textContent.trim()
     ));
     const firstCharacter = textNode.textContent.search(/\S/);
-    const lastCharacter = Math.min(
-      textNode.length,
-      firstCharacter + Math.floor(textNode.textContent.trim().length * 0.82)
-    );
-    const selection = window.getSelection();
     const range = document.createRange();
     range.setStart(textNode, firstCharacter);
-    range.setEnd(textNode, lastCharacter);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     const caret = document.createRange();
-    caret.setStart(selection.focusNode, selection.focusOffset);
-    caret.collapse(true);
-    const caretRect = caret.getClientRects()[0] || caret.getBoundingClientRect();
-    const selectionRects = [...range.getClientRects()];
-    const endpoint = caretRect.height ? caretRect : selectionRects.at(-1);
-    const bounds = range.getBoundingClientRect();
-    return {
-      text: selection.toString(),
-      endpointX: caretRect.height ? endpoint.left : endpoint.right,
-      endpointBottom: endpoint.bottom,
-      rangeRight: bounds.right
-    };
+    // Font metrics differ between macOS and Linux. Choose a visibly shorter
+    // final line instead of assuming a fixed character fraction has wrapped.
+    for (const match of textNode.textContent.matchAll(/\S(?=\s|$)/g)) {
+      const lastCharacter = match.index + 1;
+      range.setEnd(textNode, lastCharacter);
+      caret.setStart(textNode, lastCharacter);
+      caret.collapse(true);
+      const caretRect = caret.getClientRects()[0] || caret.getBoundingClientRect();
+      const selectionRects = [...range.getClientRects()];
+      const firstLine = selectionRects[0];
+      const endpoint = caretRect.height ? caretRect : selectionRects.at(-1);
+      const bounds = range.getBoundingClientRect();
+      const endpointX = caretRect.height ? endpoint.left : endpoint.right;
+      if (endpoint.top <= firstLine.top + 1 || bounds.right - endpointX < 40) continue;
+
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+      return {
+        text: selection.toString(),
+        firstCharacter,
+        lastCharacter,
+        firstLineBottom: firstLine.bottom,
+        endpointX,
+        endpointBottom: endpoint.bottom,
+        rangeRight: bounds.right
+      };
+    }
+    throw new Error("Article fixture needs a multiline selection with a shorter final line");
   });
   const selectedText = selectionInfo.text.replace(/\s+/g, " ").trim();
 
@@ -628,6 +637,7 @@ test("a reader hovers the selection dot and reuses its cached translation from t
     getComputedStyle(element, "::before").boxShadow
   ))).toBe("none");
   const selectionDotBox = await selectionDot.boundingBox();
+  expect(selectionInfo.endpointBottom).toBeGreaterThan(selectionInfo.firstLineBottom);
   expect(selectionInfo.rangeRight - selectionInfo.endpointX).toBeGreaterThan(20);
   expect(Math.abs(selectionDotBox.x + selectionDotBox.width / 2 - selectionInfo.endpointX)).toBeLessThan(2);
   expect(Math.abs(selectionDotBox.y + selectionDotBox.height / 2 - selectionInfo.endpointBottom - 4)).toBeLessThan(2);
@@ -642,15 +652,10 @@ test("a reader hovers the selection dot and reuses its cached translation from t
   expect(request.prompt).toContain("CONTEXT\n");
 
   await article.mouse.move(2, 2);
-  await source.evaluate((element) => {
+  await source.evaluate((element, { firstCharacter, lastCharacter }) => {
     const textNode = [...element.childNodes].find((node) => (
       node.nodeType === Node.TEXT_NODE && node.textContent.trim()
     ));
-    const firstCharacter = textNode.textContent.search(/\S/);
-    const lastCharacter = Math.min(
-      textNode.length,
-      firstCharacter + Math.floor(textNode.textContent.trim().length * 0.82)
-    );
     const selection = window.getSelection();
     const range = document.createRange();
     range.setStart(textNode, firstCharacter);
@@ -658,7 +663,7 @@ test("a reader hovers the selection dot and reuses its cached translation from t
     selection.removeAllRanges();
     selection.addRange(range);
     element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-  });
+  }, selectionInfo);
   await expect(selectionUi.locator(".trigger")).toBeVisible();
 
   const popup = await openPopup(extension, tabId);
