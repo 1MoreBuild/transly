@@ -523,6 +523,57 @@ test("a reader configures a provider, translates progressively, changes reading 
   expect(provider.translationRequests()[0].prompt).not.toContain("https://example.com/reference-icon");
 });
 
+test("Twitter post translations preserve paragraphs and plain-text lists", async ({
+  extension,
+  provider
+}) => {
+  await configureProvider(extension, provider);
+  const { page: article, tabId } = await openArticle(extension, { articleUrl: provider.twitterUrl });
+  const source = article.locator("#twitter-post");
+  const originalText = await source.innerText();
+  await expect(source).toHaveCSS("white-space", "pre-wrap");
+  await expect(source.locator("br")).toHaveCount(0);
+  expect(originalText).toContain("orchestration.\n\n\nOur plan is:");
+  expect(originalText).toContain("ordinary HTML spacing");
+
+  const popup = await openPopup(extension, tabId);
+  await popup.locator("#translateArticle").click();
+  await expect(article.locator("html")).toHaveAttribute("data-transly-article-status", "translated");
+
+  const sourceId = await source.getAttribute("data-transly-article-id");
+  const translation = article.locator(`.transly-translation[data-transly-for='${sourceId}']`);
+  await expect(translation).toBeVisible();
+  if (process.env.TRANSLY_TWITTER_CAPTURE) {
+    await article.screenshot({ path: process.env.TRANSLY_TWITTER_CAPTURE, fullPage: true, animations: "disabled" });
+  }
+  expect(await translation.innerText()).toBe([
+    "我们对智能体编排有不同的看法。",
+    "",
+    "",
+    "我们的计划是：",
+    "- 与持久化沙箱提供商深度集成。",
+    "- 在分布式计算环境中运行确定性工具。",
+    "- 保持编排层开放。",
+    "",
+    "我们一年前开始构建它。关注 @hatchet_dev",
+    "",
+    "本段中的普通 HTML 空白仍然合并为空格。"
+  ].join("\n"));
+  await expect(translation.locator("a[href='https://x.com/hatchet_dev']")).toHaveText("@hatchet_dev");
+  expect(await source.innerText()).toBe(originalText);
+
+  const translationInput = provider.translationRequests()
+    .map(({ prompt }) => prompt.split("TEXT TO TRANSLATE\n").at(-1))
+    .join("\n");
+  expect(translationInput).toMatch(/orchestration\.\s*(\[\[TRANSLY_PH_\d+]]\s*){3}Our plan is:/);
+  expect(translationInput).toMatch(/Our plan is:\s*\[\[TRANSLY_PH_\d+]]\s*- Integrate/);
+  expect(translationInput).toContain("ordinary HTML spacing");
+  expect(translationInput).toContain("Normal HTML indentation stays within one paragraph.");
+  const collapsedSourceId = await article.locator("#collapsed-whitespace").getAttribute("data-transly-article-id");
+  const collapsedTranslation = article.locator(`.transly-translation[data-transly-for='${collapsedSourceId}']`);
+  expect(await collapsedTranslation.innerText()).toBe("普通 HTML 缩进仍然保持在同一段中。");
+});
+
 test("a reader hovers the selection dot and reuses its cached translation from the popup", async ({
   extension,
   provider
@@ -538,30 +589,39 @@ test("a reader hovers the selection dot and reuses its cached translation from t
       node.nodeType === Node.TEXT_NODE && node.textContent.trim()
     ));
     const firstCharacter = textNode.textContent.search(/\S/);
-    const lastCharacter = Math.min(
-      textNode.length,
-      firstCharacter + Math.floor(textNode.textContent.trim().length * 0.82)
-    );
-    const selection = window.getSelection();
     const range = document.createRange();
     range.setStart(textNode, firstCharacter);
-    range.setEnd(textNode, lastCharacter);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     const caret = document.createRange();
-    caret.setStart(selection.focusNode, selection.focusOffset);
-    caret.collapse(true);
-    const caretRect = caret.getClientRects()[0] || caret.getBoundingClientRect();
-    const selectionRects = [...range.getClientRects()];
-    const endpoint = caretRect.height ? caretRect : selectionRects.at(-1);
-    const bounds = range.getBoundingClientRect();
-    return {
-      text: selection.toString(),
-      endpointX: caretRect.height ? endpoint.left : endpoint.right,
-      endpointBottom: endpoint.bottom,
-      rangeRight: bounds.right
-    };
+    // Font metrics differ between macOS and Linux. Choose a visibly shorter
+    // final line instead of assuming a fixed character fraction has wrapped.
+    for (const match of textNode.textContent.matchAll(/\S(?=\s|$)/g)) {
+      const lastCharacter = match.index + 1;
+      range.setEnd(textNode, lastCharacter);
+      caret.setStart(textNode, lastCharacter);
+      caret.collapse(true);
+      const caretRect = caret.getClientRects()[0] || caret.getBoundingClientRect();
+      const selectionRects = [...range.getClientRects()];
+      const firstLine = selectionRects[0];
+      const endpoint = caretRect.height ? caretRect : selectionRects.at(-1);
+      const bounds = range.getBoundingClientRect();
+      const endpointX = caretRect.height ? endpoint.left : endpoint.right;
+      if (endpoint.top <= firstLine.top + 1 || bounds.right - endpointX < 40) continue;
+
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+      return {
+        text: selection.toString(),
+        firstCharacter,
+        lastCharacter,
+        firstLineBottom: firstLine.bottom,
+        endpointX,
+        endpointBottom: endpoint.bottom,
+        rangeRight: bounds.right
+      };
+    }
+    throw new Error("Article fixture needs a multiline selection with a shorter final line");
   });
   const selectedText = selectionInfo.text.replace(/\s+/g, " ").trim();
 
@@ -577,6 +637,7 @@ test("a reader hovers the selection dot and reuses its cached translation from t
     getComputedStyle(element, "::before").boxShadow
   ))).toBe("none");
   const selectionDotBox = await selectionDot.boundingBox();
+  expect(selectionInfo.endpointBottom).toBeGreaterThan(selectionInfo.firstLineBottom);
   expect(selectionInfo.rangeRight - selectionInfo.endpointX).toBeGreaterThan(20);
   expect(Math.abs(selectionDotBox.x + selectionDotBox.width / 2 - selectionInfo.endpointX)).toBeLessThan(2);
   expect(Math.abs(selectionDotBox.y + selectionDotBox.height / 2 - selectionInfo.endpointBottom - 4)).toBeLessThan(2);
@@ -591,15 +652,10 @@ test("a reader hovers the selection dot and reuses its cached translation from t
   expect(request.prompt).toContain("CONTEXT\n");
 
   await article.mouse.move(2, 2);
-  await source.evaluate((element) => {
+  await source.evaluate((element, { firstCharacter, lastCharacter }) => {
     const textNode = [...element.childNodes].find((node) => (
       node.nodeType === Node.TEXT_NODE && node.textContent.trim()
     ));
-    const firstCharacter = textNode.textContent.search(/\S/);
-    const lastCharacter = Math.min(
-      textNode.length,
-      firstCharacter + Math.floor(textNode.textContent.trim().length * 0.82)
-    );
     const selection = window.getSelection();
     const range = document.createRange();
     range.setStart(textNode, firstCharacter);
@@ -607,7 +663,7 @@ test("a reader hovers the selection dot and reuses its cached translation from t
     selection.removeAllRanges();
     selection.addRange(range);
     element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-  });
+  }, selectionInfo);
   await expect(selectionUi.locator(".trigger")).toBeVisible();
 
   const popup = await openPopup(extension, tabId);

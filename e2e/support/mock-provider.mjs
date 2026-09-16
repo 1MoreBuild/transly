@@ -5,6 +5,10 @@ const ARTICLE_HTML = await readFile(
   new URL("../fixtures/article.html", import.meta.url),
   "utf8"
 );
+const TWITTER_HTML = await readFile(
+  new URL("../fixtures/twitter.html", import.meta.url),
+  "utf8"
+);
 const SUBTITLE_HTML = await readFile(
   new URL("../fixtures/subtitle.html", import.meta.url),
   "utf8"
@@ -105,6 +109,11 @@ export async function startMockProvider() {
     if (request.method === "GET" && url.pathname === "/article.html") {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end(ARTICLE_HTML);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/twitter.html") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(TWITTER_HTML);
       return;
     }
     if (request.method === "GET" && url.pathname === "/subtitle.html") {
@@ -242,6 +251,7 @@ export async function startMockProvider() {
     apiKey: API_KEY,
     apiUrl: `${origin}/v1`,
     articleUrl: `${origin}/article.html`,
+    twitterUrl: `${origin}/twitter.html`,
     subtitleUrl: `${origin}/subtitle.html`,
     subtitleSemanticUrl: `${origin}/subtitle-semantic.html`,
     subtitleTrackUrl: `${origin}/subtitle-track.html`,
@@ -315,6 +325,22 @@ function extractPassages(prompt) {
 
 function translatePassage(source, index) {
   const placeholders = source.match(/\[\[TRANSLY_PH_\d+]]/g) || [];
+  if (source.includes("We take a different view of agent orchestration.")) {
+    // Keep only protected structure: a model need not infer lost source newlines.
+    return source
+      .replace(/\s+/g, " ")
+      .replace(/(\[\[TRANSLY_PH_\d+]]) @hatchet_dev (\[\[TRANSLY_PH_\d+]])/, "$1@hatchet_dev$2")
+      .replace("We take a different view of agent orchestration.", "我们对智能体编排有不同的看法。")
+      .replace("Our plan is:", "我们的计划是：")
+      .replace("- Integrate with durable sandbox providers.", "- 与持久化沙箱提供商深度集成。")
+      .replace("- Run deterministic tools across distributed compute.", "- 在分布式计算环境中运行确定性工具。")
+      .replace("- Keep the orchestration layer open.", "- 保持编排层开放。")
+      .replace("We started building this a year ago. Follow", "我们一年前开始构建它。关注")
+      .replace("We also preserve ordinary HTML spacing inside this paragraph.", "本段中的普通 HTML 空白仍然合并为空格。");
+  }
+  if (source.includes("Normal HTML indentation stays within one paragraph.")) {
+    return "普通 HTML 缩进仍然保持在同一段中。";
+  }
   if (source.includes("First caption from the video")) return "视频中的第一句字幕。";
   if (source.includes("Second caption from the video")) return "视频中的第二句字幕。";
   const longCue = source.match(/Long cue (\d+)\./);

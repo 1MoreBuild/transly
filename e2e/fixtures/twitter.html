@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Transly E2E Twitter post</title>
+    <style>
+      body {
+        margin: 0;
+        color: #0f1419;
+        background: #fff;
+        font: 20px/1.5 system-ui, sans-serif;
+      }
+
+      article {
+        width: min(680px, calc(100% - 48px));
+        margin: 32px auto;
+      }
+
+      [data-testid="tweetText"] {
+        white-space: pre-wrap;
+        overflow-wrap: break-word;
+      }
+
+      .normal-whitespace {
+        white-space: normal;
+      }
+
+      a {
+        color: #1d9bf0;
+      }
+    </style>
+  </head>
+  <body>
+    <article data-testid="tweet">
+      <div id="twitter-post" data-testid="tweetText" lang="en"><span>We take a different view of agent orchestration.
+
+
+Our plan is:
+- Integrate with durable sandbox providers.
+- Run </span><em>deterministic</em><span> tools across distributed compute.
+- Keep the orchestration layer open.</span><span>
+
+</span><span>We started building this a year ago. Follow </span><a href="https://x.com/hatchet_dev"><span>@hatchet_dev</span></a><span>
+
+We also preserve <span class="normal-whitespace">ordinary
+        HTML
+        spacing</span> inside this paragraph.</span></div>
+      <div id="collapsed-whitespace">
+        Normal HTML indentation
+        stays within one paragraph.
+      </div>
+    </article>
+  </body>
+</html>
